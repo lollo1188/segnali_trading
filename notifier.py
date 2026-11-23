@@ -16,7 +16,10 @@ def _send(text: str) -> bool:
         return False
     try:
         r = requests.post(API, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}, timeout=10)
-        return r.status_code == 200
+        if r.status_code != 200:
+            logger.error(f"Telegram HTTP {r.status_code}: {r.text[:300]}")
+            return False
+        return True
     except Exception as e:
         logger.error(f"Telegram error: {e}"); return False
 
@@ -58,5 +61,5 @@ def send_startup_message():
         f"📅 Controlla ForexFactory ogni mattina\n"
         f"🕐 {now}"
     )
-    _send(msg)
-    
+    return _send(msg)
+
