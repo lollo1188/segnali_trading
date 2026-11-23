@@ -74,8 +74,11 @@ def run_check(name, fn, cooldown_h=4):
         if is_news_window(): return
         signal = fn()
         if signal and should_send(name, signal["direzione"], cooldown_h):
-            send_telegram(signal)
-            register(name, signal["direzione"])
+            if send_telegram(signal):
+                logger.info(f"[{name}] Segnale inviato: {signal['direzione']}")
+                register(name, signal["direzione"])
+            else:
+                logger.error(f"[{name}] Invio Telegram fallito")
     except Exception as e:
         logger.error(f"[{name}] Errore: {e}")
 
@@ -124,8 +127,10 @@ except Exception as e:
     logger.error(f"Errore scheduler: {e}")
 
 try:
-    send_startup_message()
-    logger.info("Messaggio avvio inviato")
+    if send_startup_message():
+        logger.info("Messaggio avvio inviato")
+    else:
+        logger.error("Messaggio avvio NON inviato (vedi errore Telegram sopra)")
 except Exception as e:
     logger.error(f"Errore startup message: {e}")
 
