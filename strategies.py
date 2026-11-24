@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 ROME_TZ = pytz.timezone("Europe/Rome")
 ET_TZ   = pytz.timezone("America/New_York")
 
-TICKER_GOLD   = "GC=F"
-TICKER_SP500  = "^GSPC"
+TICKER_GOLD = "GC=F"
+TICKER_SP500 = "^GSPC"
 TICKER_NASDAQ = "^NDX"
 
 
