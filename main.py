@@ -4,21 +4,26 @@ from datetime import datetime, time
 import pytz
 
 logging.basicConfig(level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s")
+                    format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
 ROME_TZ = pytz.timezone("Europe/Rome")
+
 
 # ── Health server — avvia PRIMA di qualsiasi import pesante ──────────────────
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
+
     def log_message(self, format, *args): pass
+
 
 def run_health_server():
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(("0.0.0.0", port), HealthHandler)
     logger.info(f"Health server su porta {port}")
     server.serve_forever()
+
 
 # Avvia health server nel thread principale subito
 health_thread = threading.Thread(target=run_health_server, daemon=True)
@@ -38,6 +43,7 @@ try:
     from strategies import (
         check_vwap_reversal_gold, check_london_sweep_gold,
         check_orb_sp500, check_kumo_gold_4h, check_kumo_nasdaq_1h,
+        get_last_price, fmt, TICKER_GOLD, TICKER_SP500, TICKER_NASDAQ,
     )
     logger.info("Strategies importate OK")
 except Exception as e:
@@ -56,8 +62,19 @@ except Exception as e:
     logger.error(f"Errore import news_filter: {e}")
     def is_news_window(): return False
 
+
 # ── Logica bot ────────────────────────────────────────────────────────────────
 last_signals: dict = {}
+
+# Ticker da cui leggere il prezzo attuale per ogni strategia (slittamento)
+SIGNAL_TICKER = {
+    "vwap_gold": TICKER_GOLD,
+    "london_sweep": TICKER_GOLD,
+    "orb_sp500": TICKER_SP500,
+    "kumo_gold_4h": TICKER_GOLD,
+    "kumo_nasdaq": TICKER_NASDAQ,
+}
+
 
 def should_send(name, direction, cooldown_h=4):
     now = datetime.now(ROME_TZ)
@@ -66,14 +83,24 @@ def should_send(name, direction, cooldown_h=4):
     hours = (now - last["timestamp"]).total_seconds() / 3600
     return not (last["direction"] == direction and hours < cooldown_h)
 
+
 def register(name, direction):
     last_signals[name] = {"direction": direction, "timestamp": datetime.now(ROME_TZ)}
+
 
 def run_check(name, fn, cooldown_h=4):
     try:
         if is_news_window(): return
         signal = fn()
         if signal and should_send(name, signal["direzione"], cooldown_h):
+            # Prezzo attuale al momento dell'invio → il messaggio mostra lo slittamento.
+            # Se non disponibile, il messaggio parte senza il blocco slittamento.
+            try:
+                px = get_last_price(SIGNAL_TICKER.get(name, ""))
+                if px:
+                    signal["prezzo_attuale"] = fmt(px)
+            except Exception as e:
+                logger.warning(f"[{name}] Prezzo attuale non disponibile: {type(e).__name__}")
             if send_telegram(signal):
                 logger.info(f"[{name}] Segnale inviato: {signal['direzione']}")
                 register(name, signal["direzione"])
@@ -82,45 +109,51 @@ def run_check(name, fn, cooldown_h=4):
     except Exception as e:
         logger.error(f"[{name}] Errore: {e}")
 
+
 def job_vwap_gold():
     logger.info("▶ VWAP Reversal Oro")
     run_check("vwap_gold", check_vwap_reversal_gold, 4)
 
+
 def job_london_sweep():
     now = datetime.now(ROME_TZ)
-    if not (time(8,0) <= now.time() <= time(10,0)): return
+    if not (time(8, 0) <= now.time() <= time(10, 0)): return
     logger.info("▶ London Sweep Oro")
     run_check("london_sweep", check_london_sweep_gold, 12)
 
+
 def job_orb_sp500():
     now = datetime.now(ROME_TZ)
-    if not (time(15,45) <= now.time() <= time(21,45)): return
+    if not (time(15, 45) <= now.time() <= time(21, 45)): return
     logger.info("▶ ORB S&P500")
     run_check("orb_sp500", check_orb_sp500, 8)
+
 
 def job_kumo_gold_4h():
     logger.info("▶ Kumo Rider Oro 4H")
     run_check("kumo_gold_4h", check_kumo_gold_4h, 12)
 
+
 def job_kumo_nasdaq():
     now = datetime.now(ROME_TZ)
-    if not (time(15,30) <= now.time() <= time(21,0)): return
+    if not (time(15, 30) <= now.time() <= time(21, 0)): return
     logger.info("▶ Kumo Rider Nasdaq 1H")
     run_check("kumo_nasdaq", check_kumo_nasdaq_1h, 8)
 
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 logger.info("═══════════════════════════════════════")
-logger.info("  TRADING BOT — 5 Strategie Profittevoli")
+logger.info(" TRADING BOT — 5 Strategie Profittevoli")
 logger.info("═══════════════════════════════════════")
 
 try:
     scheduler = BackgroundScheduler(timezone=ROME_TZ)
     scheduler.add_listener(lambda e: logger.error(f"Job error: {e.exception}"), EVENT_JOB_ERROR)
-    scheduler.add_job(job_vwap_gold,    "interval", minutes=15, id="vwap_gold")
+    scheduler.add_job(job_vwap_gold, "interval", minutes=15, id="vwap_gold")
     scheduler.add_job(job_london_sweep, "interval", minutes=15, id="london_sweep")
-    scheduler.add_job(job_orb_sp500,    "interval", minutes=15, id="orb_sp500")
+    scheduler.add_job(job_orb_sp500, "interval", minutes=15, id="orb_sp500")
     scheduler.add_job(job_kumo_gold_4h, "cron", hour="0,4,8,12,16,20", minute=20, id="kumo_gold_4h")
-    scheduler.add_job(job_kumo_nasdaq,  "cron", minute=5, id="kumo_nasdaq")
+    scheduler.add_job(job_kumo_nasdaq, "cron", minute=5, id="kumo_nasdaq")
     scheduler.start()
     logger.info("Scheduler avviato")
 except Exception as e:
