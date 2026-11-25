@@ -1,6 +1,6 @@
 import os, logging, threading, time as time_module
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 import pytz
 
 logging.basicConfig(level=logging.INFO,
@@ -43,7 +43,9 @@ try:
     from strategies import (
         check_vwap_reversal_gold, check_london_sweep_gold,
         check_orb_sp500, check_kumo_gold_4h, check_kumo_nasdaq_1h,
+        check_orb_ant, check_orb_cat, check_orb_avgo,
         get_last_price, fmt, TICKER_GOLD, TICKER_SP500, TICKER_NASDAQ,
+        TICKER_ANT, TICKER_CAT, TICKER_AVGO,
     )
     logger.info("Strategies importate OK")
 except Exception as e:
@@ -56,11 +58,13 @@ except Exception as e:
     logger.error(f"Errore import notifier: {e}")
 
 try:
-    from news_filter import is_news_window
+    from news_filter import is_news_window, prossimo_sblocco, motivo_blocco
     logger.info("News filter importato OK")
 except Exception as e:
     logger.error(f"Errore import news_filter: {e}")
-    def is_news_window(): return False
+    def is_news_window(name=None): return False
+    def prossimo_sblocco(name=None): return None
+    def motivo_blocco(name=None): return None
 
 
 # ── Logica bot ────────────────────────────────────────────────────────────────
@@ -73,6 +77,9 @@ SIGNAL_TICKER = {
     "orb_sp500": TICKER_SP500,
     "kumo_gold_4h": TICKER_GOLD,
     "kumo_nasdaq": TICKER_NASDAQ,
+    "orb_ant": TICKER_ANT,
+    "orb_cat": TICKER_CAT,
+    "orb_avgo": TICKER_AVGO,
 }
 
 
@@ -88,9 +95,28 @@ def register(name, direction):
     last_signals[name] = {"direction": direction, "timestamp": datetime.now(ROME_TZ)}
 
 
+def _pianifica_ripetizione(name, fn, cooldown_h):
+    """Se il controllo è stato saltato per una notizia, lo ripete subito dopo la
+    fine del blocco (così la candela non va persa). Per blocchi lunghi (festivi,
+    utili) non ripete."""
+    try:
+        fine = prossimo_sblocco(name)
+        if fine is None: return
+        if fine - datetime.now(ROME_TZ) > timedelta(hours=2): return
+        scheduler.add_job(run_check, "date", run_date=fine + timedelta(minutes=1),
+                          args=[name, fn, cooldown_h], id=f"retry_{name}",
+                          replace_existing=True)
+        logger.info(f"[{name}] Controllo ripetuto alle {fine + timedelta(minutes=1):%H:%M}")
+    except Exception as e:
+        logger.warning(f"[{name}] Ripetizione non pianificata: {type(e).__name__}")
+
+
 def run_check(name, fn, cooldown_h=4):
     try:
-        if is_news_window(): return
+        if is_news_window(name):
+            logger.info(f"[{name}] Filtro notizie attivo: {motivo_blocco(name)}")
+            _pianifica_ripetizione(name, fn, cooldown_h)
+            return
         signal = fn()
         if signal and should_send(name, signal["direzione"], cooldown_h):
             # Prezzo attuale al momento dell'invio → il messaggio mostra lo slittamento.
@@ -129,6 +155,25 @@ def job_orb_sp500():
     run_check("orb_sp500", check_orb_sp500, 8)
 
 
+def _job_orb_azione(name, label, fn):
+    now = datetime.now(ROME_TZ)
+    if not (time(16, 0) <= now.time() <= time(20, 30)): return
+    logger.info(f"▶ ORB {label}")
+    run_check(name, fn, 8)
+
+
+def job_orb_ant():
+    _job_orb_azione("orb_ant", "Anthropic (ANT)", check_orb_ant)
+
+
+def job_orb_cat():
+    _job_orb_azione("orb_cat", "Caterpillar (CAT)", check_orb_cat)
+
+
+def job_orb_avgo():
+    _job_orb_azione("orb_avgo", "Broadcom (AVGO)", check_orb_avgo)
+
+
 def job_kumo_gold_4h():
     logger.info("▶ Kumo Rider Oro 4H")
     run_check("kumo_gold_4h", check_kumo_gold_4h, 12)
@@ -143,7 +188,7 @@ def job_kumo_nasdaq():
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 logger.info("═══════════════════════════════════════")
-logger.info(" TRADING BOT — 5 Strategie Profittevoli")
+logger.info(" TRADING BOT — 8 Strategie")
 logger.info("═══════════════════════════════════════")
 
 try:
@@ -152,6 +197,9 @@ try:
     scheduler.add_job(job_vwap_gold, "interval", minutes=15, id="vwap_gold")
     scheduler.add_job(job_london_sweep, "interval", minutes=15, id="london_sweep")
     scheduler.add_job(job_orb_sp500, "interval", minutes=15, id="orb_sp500")
+    scheduler.add_job(job_orb_ant, "interval", minutes=15, id="orb_ant")
+    scheduler.add_job(job_orb_cat, "interval", minutes=15, id="orb_cat")
+    scheduler.add_job(job_orb_avgo, "interval", minutes=15, id="orb_avgo")
     scheduler.add_job(job_kumo_gold_4h, "cron", hour="0,4,8,12,16,20", minute=20, id="kumo_gold_4h")
     scheduler.add_job(job_kumo_nasdaq, "cron", minute=5, id="kumo_nasdaq")
     scheduler.start()
