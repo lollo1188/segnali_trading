@@ -13,10 +13,76 @@ Bot di segnali semi-automatico per i CFD di Revolut. Gira H24 su Railway e ti ma
 | 3 | ORB S&P500 | S&P 500 | 15min | Breakout della prima candela USA (15:30) + VWAP + EMA20 + RSI | 15:45–21:45 |
 | 4 | Kumo Rider Oro | Oro | 4H (swing) | Ichimoku 9/26/52 + RSI | sempre |
 | 5 | Kumo Rider Nasdaq | Nasdaq 100 | 1H (swing) | Ichimoku 9/26/52 + RSI | 15:30–21:00 |
+| 6 | ORB Anthropic | ANT (Nasdaq) | 15min | ORB adattata a un titolo singolo | 16:00–20:30 |
+| 7 | ORB Caterpillar | CAT (NYSE) | 15min | ORB adattata a un titolo singolo | 16:00–20:30 |
+| 8 | ORB Broadcom | AVGO (Nasdaq) | 15min | ORB adattata a un titolo singolo | 16:00–20:30 |
 
-Le strategie 1, 2 e 3 sono **intraday**: chiudi entro le 21:45 CET. Le strategie 4 e 5 possono restare aperte overnight.
+Le strategie 1, 2, 3, 6, 7 e 8 sono **intraday**: chiudi entro le 21:45 CET. Le strategie 4 e 5 possono restare aperte overnight.
 
 Dopo un segnale, la stessa strategia nella stessa direzione non viene riproposta per un periodo di pausa (4–12 ore a seconda della strategia). Questa pausa è tenuta in memoria: si azzera a ogni riavvio del bot.
+
+### Strategie su azioni singole (6, 7, 8)
+
+Stessa logica dell'ORB S&P500 (breakout della candela delle 15:30 con VWAP, EMA20 e RSI), con adattamenti ai titoli singoli:
+
+| | ANT | CAT | AVGO |
+|---|---|---|---|
+| Stop massimo (% del prezzo) | 5% | 3% | 4% |
+| Short per default | disattivato | attivo | attivo |
+| Backtest | **impossibile** (quotata dal 19/11/2026) | `backtest.py azioni` | `backtest.py azioni` |
+
+- Il segnale parte solo se la candela è di oggi e chiusa da meno di 25 minuti (evita dati vecchi in giorni festivi o mezze sedute).
+- Gli stop massimi in percentuale sono valori **arbitrari**, non ottimizzati.
+- Tutti i parametri sono **non validati**: usa solo demo o rischio minimo.
+- **Evita i giorni dei risultati trimestrali**: il bot non conosce le date degli utili e quei giorni hanno gap e volatilità anomali.
+- ANT e AVGO sono entrambi legati al tema AI e AVGO si muove spesso con il Nasdaq: più segnali nella stessa direzione non sono indipendenti.
+- Non è verificato che Revolut offra i CFD su ANT, CAT e AVGO: controlla nell'app.
+
+---
+
+## 🕐 Quando arrivano i segnali (ora italiana, lun–ven)
+
+| Strategia | Orari possibili | Note |
+|-----------|-----------------|------|
+| VWAP Reversal Oro | ~08:15–22:00 | Controllo ogni 15 min |
+| London Sweep Oro | ~08:30–10:00 | Solo long |
+| ORB S&P500 | ~16:00–21:45 | Al massimo uno al giorno per direzione |
+| ORB ANT / CAT / AVGO | ~16:00–20:30 | Come sopra |
+| Kumo Rider Oro 4H | 00:20, 04:20, 08:20, 12:20, 16:20, 20:20 | Raro: serve un incrocio Ichimoku |
+| Kumo Rider Nasdaq 1H | ~17:05, 18:05, 19:05, 20:05 | Raro |
+
+Sono finestre possibili, non garantite: il segnale arriva solo se le condizioni sono vere. Nel weekend e nei giorni festivi USA il bot è silenzioso. In più il filtro notizie (sotto) può saltare alcuni controlli.
+
+---
+
+## 🛡️ Filtro notizie (`news_filter.py`)
+
+Il bot salta i controlli nelle finestre ad alto rischio. **Non usa un calendario online**: usa le date scritte in `news_filter.py`, che **devi aggiornare tu**.
+
+Le finestre sono definite in **ora di New York** e convertite in ora italiana per ogni data, quindi restano corrette anche quando ora legale USA ed Europa sono sfasate.
+
+| Regola | Quando | Chi riguarda |
+|--------|--------|--------------|
+| Dati USA 08:30 ET (≈14:25–14:50 italiane) | Ogni giorno feriale | Strategie intraday (non le Kumo) |
+| Eventi ad alto impatto (NFP, CPI, FOMC) | Solo nelle date in elenco | Tutte le strategie |
+| Wall Street chiusa / mezza seduta | Date in elenco | ORB, Kumo Nasdaq |
+| Oro chiuso | Natale, Capodanno | Strategie sull'oro |
+| Giorno dei risultati trimestrali | Date in elenco per titolo | ORB sul singolo titolo |
+
+**Calendario inserito** (da verificare periodicamente su BLS, Federal Reserve, NYSE e comunicati delle società):
+- NFP 4/12/2026, FOMC 9/12/2026, CPI 10/12/2026, 13/1/2027, 11/2/2027, 10/3/2027
+- Chiusure USA: 26/11/2026, 25/12/2026, 1/1/2027; mezze sedute: 27/11/2026 e 24/12/2026
+- Utili Broadcom: reazione del titolo il 10/12/2026 (risultati il 9/12 dopo la chiusura)
+- **Da completare**: NFP e FOMC 2027, altre chiusure 2027, utili di Caterpillar e Anthropic
+
+**Ripresa dei controlli:** se un controllo viene saltato per una notizia e il blocco finisce entro 2 ore, il bot lo ripete un minuto dopo la fine del blocco, così la candela non va persa. Per blocchi lunghi (festivi, giorno degli utili) non ripete.
+
+**Limiti da conoscere:**
+- Il calendario si aggiorna a mano: se manca una data, il bot non blocca nulla.
+- Non copre ISM, discorsi Fed, PCE e altri dati non inseriti, né notizie improvvise.
+- Le date degli utili di CAT e ANT non sono ancora inserite.
+- Gli orari dell'oro nei giorni festivi sono un'approssimazione: verifica quelli del tuo CFD.
+- Le strategie hanno comunque orari propri in ora italiana (per esempio la candela delle 15:30 per l'ORB) che restano sfasati nelle settimane con ora legale non allineata.
 
 ---
 
@@ -107,6 +173,7 @@ La percentuale di rischio la decidi tu. La scritta "Rischia max 1.5%" nel messag
 ```bash
 python3 backtest.py        # 4 strategie storiche (Surfista, Pendolo, Rompighiaccio, Barile Caldo)
 python3 backtest.py orb    # confronto varianti ORB S&P500 (60 giorni)
+python3 backtest.py azioni # ORB su CAT e AVGO (60 giorni, un trade al giorno)
 ```
 
 Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine sessione senza toccare stop né target ("Open"), al netto dei costi. La colonna `Open` ti dice quanti sono.
@@ -115,7 +182,9 @@ Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine s
 - Per i dati a 15 minuti Yahoo Finance fornisce solo circa 60 giorni: l'ORB viene testato su poche decine di trade, troppo poche per un PF affidabile.
 - Il backtest non include le strategie VWAP Reversal, London Sweep e Kumo Rider: **i PF indicati nei commenti del codice non sono verificati da nessuno script del repository**.
 - Il backtest simula un solo trade al giorno e non gestisce il TP1 con break-even.
-- Il filtro sull'ampiezza dell'opening range usa l'ATR dell'intera giornata, quindi anche candele future (lookahead).
+- Nelle varianti ORB S&P500 il filtro sull'ampiezza dell'opening range usa l'ATR dell'intera giornata, quindi anche candele future (lookahead). Il backtest `azioni` non ha questo difetto.
+- Nessun backtest include il filtro notizie né i costi reali di Revolut: il costo è un importo fisso per operazione.
+- Per ANT non esiste storico sufficiente: nessun backtest possibile.
 
 ---
 
@@ -124,7 +193,8 @@ Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine s
 - **Dati Yahoo Finance**, non il prezzo del CFD di Revolut.
 - I controlli girano ogni 15 minuti dall'avvio, non allineati alle candele: l'entry può essere vecchia fino a circa 15 minuti. Per questo esiste il blocco slittamento.
 - L'opening range è fissato alle 15:30 CET. Nelle settimane in cui l'ora legale USA ed Europa è sfasata (marzo e fine ottobre/inizio novembre) l'apertura USA cade alle 14:30 e il bot userebbe la candela sbagliata.
-- Il bot non conosce i giorni festivi o le mezze sedute di Wall Street: in quei giorni può proporre segnali basati su candele vecchie. Ignorali.
+- Il bot non conosce i giorni festivi o le mezze sedute di Wall Street. Le strategie su azioni (6, 7, 8) controllano che la candela sia recente; le altre no, e in quei giorni possono proporre segnali basati su candele vecchie. Ignorali.
+- Il filtro notizie dipende da un calendario che aggiorni tu e non copre le notizie impreviste (vedi sezione dedicata).
 - Non segue le operazioni: non controlla stop e target e non ti avvisa del TP1 o della chiusura serale.
 - Il limite "max 4% totale" nel messaggio di avvio è solo un promemoria.
 
@@ -156,6 +226,11 @@ Nel tab **Variables** aggiungi:
 - `TELEGRAM_TOKEN` = il token che ti ha dato BotFather
 - `CHAT_ID` = il tuo ID numerico Telegram
 
+Variabili **opzionali** (strategie su azioni):
+
+- `ANT_ABILITA_SHORT`, `CAT_ABILITA_SHORT`, `AVGO_ABILITA_SHORT` = `1` o `0` (default: ANT `0`, CAT e AVGO `1`)
+- `TICKER_ANT`, `TICKER_CAT`, `TICKER_AVGO` = simbolo Yahoo Finance, se diverso da quello predefinito
+
 Railway riavvia il bot da solo.
 
 ### STEP 5 — Verifica
@@ -173,50 +248,6 @@ Railway riavvia il bot da solo.
 - Se il bot si ferma: Railway → **Restart**
 - Per aggiornare il codice: modifica i file su GitHub, Railway si aggiorna da solo (la pausa tra segnali si azzera a ogni deploy, quindi può arrivare un segnale ripetuto)
 - Nei log non compare il token Telegram, ma controlla che non finisca mai in un messaggio d'errore copiato in giro
-
----
-
-*Non costituisce consulenza finanziaria. Il trading con leva comporta rischio di perdita del capitale.*
-
-
-## 📊 Come eseguire su Revolut
-
-1. Ricevi notifica Telegram
-2. Apri Revolut → Trading → cerca l'asset
-3. Imposta:
-   - **Direzione:** Long o Short
-   - **Stop Loss:** il valore indicato
-   - **Take Profit:** il valore indicato
-   - **Size:** in base alla regola 1% (vedi sotto)
-4. Conferma il trade
-
-### Calcolo della size (regola 1%)
-
-```
-Rischio € = Capitale × 1%
-Size = Rischio € / (Entry - Stop Loss)
-```
-
-**Esempio:** Capitale €1.000, Entry 5120, SL 5095 → Rischio €10 → Size = 10/25 = 0.4 contratti
-
----
-
-## ⚠️ Regole fondamentali
-
-- Mai rischiare più dell'1% del capitale per trade
-- Dopo 3 stop loss consecutivi: stop per la giornata
-- Controlla sempre [forexfactory.com](https://forexfactory.com) la mattina (notizie rosse)
-- WTI: verifica la scadenza del future ogni mese (terzo venerdì)
-- S&P500 e Nasdaq sono correlati — non aprire entrambi nella stessa direzione
-
----
-
-## 🔧 Manutenzione
-
-- Il bot gira in automatico H24 su Railway
-- Railway free tier: 500 ore/mese (sufficiente per un bot worker)
-- Se il bot si ferma: vai su Railway → "Restart"
-- Per aggiornare il codice: modifica i file su GitHub → Railway si aggiorna automaticamente
 
 ---
 
