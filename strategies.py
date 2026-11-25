@@ -5,8 +5,12 @@ STRATEGIE DI TRADING — 5 strategie profittevoli
 3. ORB S&P500 15min (PF 1.40) — intraday
 4. Kumo Rider Oro 4H (PF 1.62) — swing overnight OK
 5. Kumo Rider Nasdaq 1H (PF 1.51) — swing overnight OK
+6. ORB Anthropic ANT 15min — intraday (SPERIMENTALE: nessun backtest possibile)
+7. ORB Caterpillar CAT 15min — intraday (non validata: usa backtest.py azioni)
+8. ORB Broadcom AVGO 15min — intraday (non validata: usa backtest.py azioni)
 """
 import logging
+import os
 from datetime import datetime, time
 from typing import Optional
 
@@ -24,6 +28,9 @@ ET_TZ = pytz.timezone("America/New_York")
 TICKER_GOLD = "GC=F"
 TICKER_SP500 = "^GSPC"
 TICKER_NASDAQ = "^NDX"
+TICKER_ANT = os.environ.get("TICKER_ANT", "ANT")     # Anthropic, Nasdaq (da giovedì 19/11/2026)
+TICKER_CAT = os.environ.get("TICKER_CAT", "CAT")     # Caterpillar, NYSE
+TICKER_AVGO = os.environ.get("TICKER_AVGO", "AVGO")  # Broadcom, Nasdaq
 
 
 # ── Download dati ─────────────────────────────────────────────────────────────
@@ -548,3 +555,154 @@ def check_kumo_nasdaq_1h() -> Optional[dict]:
         }
 
     return None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STRATEGIE 6-8 — ORB SU AZIONI SINGOLE (ANT, CAT, AVGO) 15min
+# Intraday — OR = prima candela 15:30, ingressi 16:00-20:30 CET
+#
+# Stessa logica dell'ORB S&P500, con adattamenti ai titoli singoli:
+#  - OR più largo ammesso (3.0 × ATR invece di 2.5)
+#  - stop massimo in % del prezzo (ANT 5%, AVGO 4%, CAT 3%) — valori arbitrari
+#  - dati freschi: candela di oggi e chiusa da meno di 25 minuti
+#
+# ⚠️ Parametri NON validati.
+#   ANT: quotata dal 19/11/2026, nessuno storico → niente backtest possibile.
+#   CAT, AVGO: puoi provare `python3 backtest.py azioni` (circa 60 giorni di dati).
+# ⚠️ Evita i giorni dei risultati trimestrali (gap e volatilità anomali).
+# Short: ANT disattivato per default (CAT/AVGO attivi). Variabili Railway:
+#   ANT_ABILITA_SHORT, CAT_ABILITA_SHORT, AVGO_ABILITA_SHORT  = "1" oppure "0"
+# ══════════════════════════════════════════════════════════════════════════════
+
+ANT_ABILITA_SHORT = os.environ.get("ANT_ABILITA_SHORT", "0") == "1"
+CAT_ABILITA_SHORT = os.environ.get("CAT_ABILITA_SHORT", "1") == "1"
+AVGO_ABILITA_SHORT = os.environ.get("AVGO_ABILITA_SHORT", "1") == "1"
+
+
+def _check_orb_azione(ticker: str, nome: str, asset: str, short_ok: bool,
+                      max_risk_pct: float, nota_extra: str) -> Optional[dict]:
+    df = get_data(ticker, period="5d", interval="15m")
+    if df is None or len(df) < 40:
+        return None
+
+    df["atr14"] = atr(df, 14)
+    df["rsi14"] = rsi(df["Close"], 14)
+    df["ema20"] = ema(df["Close"], 20)
+
+    # VWAP giornaliero
+    df_copy = df.copy()
+    df_copy["_d"] = df_copy.index.date
+    parts = []
+    for d, g in df_copy.groupby("_d"):
+        tp = (g["High"] + g["Low"] + g["Close"]) / 3
+        parts.append((tp * g["Volume"]).cumsum() / g["Volume"].cumsum())
+    df["vwap"] = pd.concat(parts).reindex(df.index)
+    df.dropna(inplace=True)
+    if len(df) < 3:
+        return None
+
+    now_cet = datetime.now(ROME_TZ)
+    if not (time(16, 0) <= now_cet.time() <= time(20, 30)):
+        return None
+
+    # Usa [-2] = ultima candela chiusa, [-1] è ancora in formazione
+    curr = df.iloc[-2]
+    prev = df.iloc[-3]
+
+    # Dati freschi: la candela deve essere di oggi e chiusa da poco.
+    # Evita segnali su dati vecchi (festivi, mezze sedute, ritardi di Yahoo).
+    fine_candela = curr.name + pd.Timedelta(minutes=15)
+    if curr.name.date() != now_cet.date() or (now_cet - fine_candela) > pd.Timedelta(minutes=25):
+        return None
+
+    today_df = df[df.index.date == now_cet.date()]
+
+    # Opening Range: prima candela 15:30
+    or_bar = today_df[today_df.index.time == time(15, 30)]
+    if len(or_bar) == 0:
+        return None
+
+    or_high = or_bar["High"].iloc[0]
+    or_low = or_bar["Low"].iloc[0]
+    or_range = or_high - or_low
+
+    # Salta se OR troppo ampio
+    atr_day = today_df["atr14"].mean()
+    if or_range > 3.0 * atr_day:
+        return None
+
+    entry = curr["Close"]
+    a = curr["atr14"]
+
+    # LONG: breakout sopra OR high + sopra VWAP + EMA20 crescente + RSI > 52
+    if (entry > or_high + 0.1 * a and
+            entry > curr["vwap"] and
+            curr["ema20"] > prev["ema20"] and
+            curr["rsi14"] > 52):
+        sl = max(or_low, entry - 2.0 * a)
+        risk = entry - sl
+        if risk <= 0 or risk / entry > max_risk_pct:
+            return None
+        tp1 = entry + 1.5 * risk
+        tp2 = entry + 2.5 * risk
+        return {
+            "strategia": f"🟢 {nome}",
+            "asset": asset,
+            "timeframe": "15min",
+            "direzione": "LONG",
+            "entry": fmt(entry),
+            "sl": fmt(sl),
+            "tp": fmt(tp2),
+            "rr": "1:2.5",
+            "candela": candle_label(curr.name, 15),
+            "tp1": fmt(tp1),
+            "note": f"Breakout OR high {fmt(or_high)} | Sopra VWAP | TP1 {fmt(tp1)} → sposta SL a BE | "
+                    f"{nota_extra} | Chiudi entro 21:45"
+        }
+
+    # SHORT (se abilitato): breakout sotto OR low + sotto VWAP + EMA20 decrescente + RSI < 48
+    if (short_ok and
+            entry < or_low - 0.1 * a and
+            entry < curr["vwap"] and
+            curr["ema20"] < prev["ema20"] and
+            curr["rsi14"] < 48):
+        sl = min(or_high, entry + 2.0 * a)
+        risk = sl - entry
+        if risk <= 0 or risk / entry > max_risk_pct:
+            return None
+        tp1 = entry - 1.5 * risk
+        tp2 = entry - 2.5 * risk
+        return {
+            "strategia": f"🔴 {nome}",
+            "asset": asset,
+            "timeframe": "15min",
+            "direzione": "SHORT",
+            "entry": fmt(entry),
+            "sl": fmt(sl),
+            "tp": fmt(tp2),
+            "rr": "1:2.5",
+            "candela": candle_label(curr.name, 15),
+            "tp1": fmt(tp1),
+            "note": f"Breakout sotto OR low {fmt(or_low)} | Sotto VWAP | TP1 {fmt(tp1)} → sposta SL a BE | "
+                    f"{nota_extra} | Chiudi entro 21:45"
+        }
+
+    return None
+
+
+def check_orb_ant() -> Optional[dict]:
+    return _check_orb_azione(
+        TICKER_ANT, "ORB ANTHROPIC (ANT)", "Anthropic (ANT)", ANT_ABILITA_SHORT, 0.05,
+        "⚠️ Titolo IPO recente: gap e volatilità elevati, strategia NON testata")
+
+
+def check_orb_cat() -> Optional[dict]:
+    return _check_orb_azione(
+        TICKER_CAT, "ORB CATERPILLAR (CAT)", "Caterpillar (CAT)", CAT_ABILITA_SHORT, 0.03,
+        "⚠️ Evita i giorni dei risultati trimestrali | strategia non validata")
+
+
+def check_orb_avgo() -> Optional[dict]:
+    return _check_orb_azione(
+        TICKER_AVGO, "ORB BROADCOM (AVGO)", "Broadcom (AVGO)", AVGO_ABILITA_SHORT, 0.04,
+        "⚠️ Evita i giorni dei risultati trimestrali | strategia non validata")
