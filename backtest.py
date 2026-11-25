@@ -2,6 +2,7 @@
 BACKTEST — Simulazione storica delle strategie
 Esegui con: python3 backtest.py          (4 strategie storiche)
             python3 backtest.py orb      (confronto varianti ORB S&P500)
+            python3 backtest.py azioni   (ORB su CAT e AVGO)
 
 VERSIONE CORRETTA:
  - PF = profitti netti / perdite nette su TUTTI i trade (anche quelli "OPEN",
@@ -22,7 +23,7 @@ import pytz
 ROME_TZ = pytz.timezone("Europe/Rome")
 ET_TZ = pytz.timezone("America/New_York")
 
-COSTS = {"SP500": 2.0, "GOLD": 2.5, "NASDAQ": 4.0, "WTI": 4.0}
+COSTS = {"SP500": 2.0, "GOLD": 2.5, "NASDAQ": 4.0, "WTI": 4.0, "AZIONI": 2.0}
 CAPITAL = 1000.0
 RISK_PCT = 0.01
 
@@ -813,6 +814,86 @@ def backtest_orb_regime():
     return simulate(pd.DataFrame(signals), COSTS["SP500"], "🧭 ORB + REGIME")
 
 
+# ── ORB su azioni singole (stessa logica del bot live) ───────────────────────
+# Per CAT e AVGO. Le condizioni replicano check_orb_azione() di strategies.py.
+# Differenze: un solo trade al giorno; nessun TP1/break-even; costo fisso 2 €
+# (da adeguare allo spread reale di Revolut). ATR giornaliero calcolato solo
+# sulle candele già avvenute (nessun lookahead).
+def backtest_orb_azione(ticker, label, max_risk_pct=0.05, permetti_short=True):
+    print(f"⏳ Backtest {label}...")
+    df = get_data(ticker, "60d", "15m")
+    if df is None:
+        return None
+    if df.index.tz is None:
+        df.index = df.index.tz_localize("UTC")
+    df.index = df.index.tz_convert(ROME_TZ)
+
+    df["ema20"] = ema(df["Close"], 20)
+    df["rsi14"] = rsi(df["Close"], 14)
+    df["atr14"] = atr_calc(df, 14)
+    parts = []
+    for d, g in df.groupby(df.index.date):
+        tp_val = (g["High"] + g["Low"] + g["Close"]) / 3
+        parts.append((tp_val * g["Volume"]).cumsum() / g["Volume"].cumsum())
+    df["vwap"] = pd.concat(parts).reindex(df.index)
+    df.dropna(inplace=True)
+
+    signals = []
+    for d in sorted(set(df.index.date)):
+        day_df = df[df.index.date == d]
+        or_bar = day_df[day_df.index.time == time(15, 30)]
+        if len(or_bar) == 0:
+            continue
+        or_high = or_bar["High"].iloc[0]
+        or_low = or_bar["Low"].iloc[0]
+        or_range = or_high - or_low
+        session = day_df[day_df.index.time <= time(21, 45)]
+
+        # Candele valutabili: il bot le legge tra le 16:00 e le 20:30,
+        # cioè candele con inizio tra 15:45 e 20:15
+        for i in range(1, len(day_df)):
+            curr = day_df.iloc[i]
+            prev = day_df.iloc[i - 1]
+            t = curr.name.time()
+            if not (time(15, 45) <= t <= time(20, 15)):
+                continue
+
+            atr_day = day_df["atr14"].iloc[:i + 1].mean()   # solo dati già noti
+            if or_range > 3.0 * atr_day:
+                break
+            entry = curr["Close"]
+            a = curr["atr14"]
+            sig = None
+
+            if (entry > or_high + 0.1 * a and entry > curr["vwap"] and
+                    curr["ema20"] > prev["ema20"] and curr["rsi14"] > 52):
+                sl = max(or_low, entry - 2.0 * a)
+                risk = entry - sl
+                if risk > 0 and risk / entry <= max_risk_pct:
+                    sig = {"direction": 1, "entry": entry, "sl": sl, "tp": entry + 2.5 * risk}
+            elif (permetti_short and entry < or_low - 0.1 * a and entry < curr["vwap"] and
+                  curr["ema20"] < prev["ema20"] and curr["rsi14"] < 48):
+                sl = min(or_high, entry + 2.0 * a)
+                risk = sl - entry
+                if risk > 0 and risk / entry <= max_risk_pct:
+                    sig = {"direction": -1, "entry": entry, "sl": sl, "tp": entry - 2.5 * risk}
+
+            if sig is None:
+                continue
+            future = session[session.index > curr.name]
+            exit_p = _forward_exit(future, sig["direction"], sig["sl"], sig["tp"])
+            if exit_p is None:
+                continue
+            sig["next_close"] = exit_p
+            signals.append(sig)
+            break   # un solo trade al giorno
+
+    if not signals:
+        print(f"  Nessun segnale per {label}")
+        return None
+    return simulate(pd.DataFrame(signals), COSTS["AZIONI"], f"🏭 {label}")
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "orb":
@@ -823,6 +904,13 @@ if __name__ == "__main__":
             backtest_initial_balance(),
             backtest_gap_fill(),
             backtest_orb_regime(),
+        ]
+        print_results([r for r in results if r is not None])
+    elif len(sys.argv) > 1 and sys.argv[1] == "azioni":
+        print("🔍 Backtest ORB su azioni singole — circa 60 giorni di dati...\n")
+        results = [
+            backtest_orb_azione("CAT", "ORB CAT", max_risk_pct=0.03),
+            backtest_orb_azione("AVGO", "ORB AVGO", max_risk_pct=0.04),
         ]
         print_results([r for r in results if r is not None])
     else:
