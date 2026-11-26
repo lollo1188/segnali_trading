@@ -85,6 +85,9 @@ UTILI = {
     # TODO: aggiungi la data quando Caterpillar e Anthropic annunciano i risultati.
     "orb_cat": [],
     "orb_ant": [],
+    # Ritracciamento giornaliero: si guarda il giorno in cui si ENTRA (apertura del giorno dopo il segnale).
+    "pullback_avgo": [date(2026, 12, 10)],
+    "pullback_sp500": [],
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -177,3 +180,22 @@ def prossimo_sblocco(strategia: Optional[str] = None, ora: Optional[datetime] = 
 def is_trading_day() -> bool:
     """True se oggi è un giorno lavorativo (Lun–Ven). Non usata dal bot."""
     return datetime.now(ROME_TZ).weekday() < 5
+
+
+# ── Funzioni per le strategie giornaliere (ritracciamento) ────────────────────
+def prossimo_giorno_usa(d: date) -> date:
+    """Primo giorno di borsa USA dopo d (salta weekend e chiusure in GIORNI_USA_CHIUSI)."""
+    x = d + timedelta(days=1)
+    while x.weekday() >= 5 or x in GIORNI_USA_CHIUSI:
+        x += timedelta(days=1)
+    return x
+
+
+def utili_il(strategia: str, d: date) -> bool:
+    """True se d è un giorno di risultati trimestrali per quella strategia."""
+    return d in UTILI.get(strategia, [])
+
+
+def eventi_del_giorno(d: date) -> List[str]:
+    """Eventi ad alto impatto (NFP, CPI, FOMC...) in calendario per il giorno d (data USA)."""
+    return [desc for (dd, _, _, desc) in EVENTI_ALTO_IMPATTO if dd == d]

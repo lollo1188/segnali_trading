@@ -11,7 +11,7 @@ STRATEGIE DI TRADING — 5 strategie profittevoli
 """
 import logging
 import os
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from typing import Optional
 
 import numpy as np
@@ -706,3 +706,109 @@ def check_orb_avgo() -> Optional[dict]:
     return _check_orb_azione(
         TICKER_AVGO, "ORB BROADCOM (AVGO)", "Broadcom (AVGO)", AVGO_ABILITA_SHORT, 0.04,
         "⚠️ Evita i giorni dei risultati trimestrali | strategia non validata")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STRATEGIE 9-10 — RITRACCIAMENTO NEL TREND GIORNALIERO (S&P 500, AVGO)
+# Segnale a fine seduta USA, ingresso all'APERTURA del giorno dopo. SOLO LONG.
+#   Trend:   chiusura sopra la media a 200 giorni
+#   Ingresso: RSI(2) < 10 alla chiusura
+#   Uscita:  chiusura sopra la media a 5 giorni | stop = 3 × ATR(14) | max 10 giorni
+# Stesse regole di `python3 backtest.py trend` / `trend_azioni`.
+# ⚠️ Il bot NON conosce le tue posizioni: segue una posizione TEORICA dal segnale
+#    e ti manda un promemoria serale. Dopo un riavvio la memoria si azzera.
+# ⚠️ Nel backtest l'uscita avviene alla chiusura; qui si esce all'apertura del
+#    giorno dopo (riga "Uscita apertura dopo" del backtest).
+# ══════════════════════════════════════════════════════════════════════════════
+
+PB_RSI_SOGLIA = 10
+PB_ATR_STOP = 3.0
+PB_MAX_GIORNI = 10
+
+
+def analizza_pullback(ticker: str, chiave: str, nome: str, posizione: Optional[dict]):
+    """Analizza l'ultima candela giornaliera chiusa.
+    Ritorna (messaggio | None, posizione_aggiornata, data_candela | None).
+    messaggio = dict per notifier.send_pullback; None se non c'è nulla da dire.
+    data_candela = None se i dati non sono ancora aggiornati (si può riprovare)."""
+    try:
+        from news_filter import prossimo_giorno_usa, utili_il, eventi_del_giorno
+    except Exception:
+        def prossimo_giorno_usa(d):
+            x = d + timedelta(days=1)
+            while x.weekday() >= 5:
+                x += timedelta(days=1)
+            return x
+        def utili_il(k, d): return False
+        def eventi_del_giorno(d): return []
+
+    df = get_data(ticker, period="2y", interval="1d")
+    if df is None or len(df) < 230:
+        return None, posizione, None
+
+    now_et = datetime.now(ET_TZ)
+    last_date = df.index[-1].date()
+    # Candela di oggi, a borsa chiusa: altrimenti dati vecchi (festivo) o non ancora aggiornati
+    if last_date != now_et.date() or now_et.time() < time(16, 5):
+        return None, posizione, None
+
+    df = df.copy()
+    df["sma200"] = df["Close"].rolling(200).mean()
+    df["sma5"] = df["Close"].rolling(5).mean()
+    df["rsi2"] = rsi(df["Close"], 2)
+    df["atr14"] = atr(df, 14)
+    df = df.dropna()
+    if len(df) < 3 or df.index[-1].date() != last_date:
+        return None, posizione, None
+    last = df.iloc[-1]
+
+    # ── Posizione teorica aperta: stato e promemoria di uscita ───────────────
+    if posizione:
+        ed = posizione["entry_date"]
+        if last_date < ed:                       # ingresso ancora da fare (domani)
+            return None, posizione, last_date
+        barre = df[[d.date() >= ed for d in df.index]]
+        if len(barre) == 0 or barre.index[0].date() != ed:
+            return None, None, last_date         # dati incoerenti: azzera
+        entry = float(barre.iloc[0]["Open"])
+        stop = entry - PB_ATR_STOP * posizione["atr"]
+        for k in range(len(barre)):
+            b = barre.iloc[k]
+            giorno = barre.index[k].date()
+            gg = k + 1
+            evento = None
+            if b["Open"] <= stop or b["Low"] <= stop:
+                evento = "STOP"
+            elif b["Close"] > b["sma5"]:
+                evento = "USCITA"
+            elif gg >= PB_MAX_GIORNI:
+                evento = "TEMPO"
+            if evento:
+                msg = {"tipo": evento, "nome": nome, "ticker": ticker, "data": giorno,
+                       "close": float(b["Close"]), "sma5": float(b["sma5"]),
+                       "entry": entry, "stop": stop, "giorni": gg,
+                       "recente": giorno == last_date}
+                return msg, None, last_date
+        b = barre.iloc[-1]
+        msg = {"tipo": "MANTIENI", "nome": nome, "ticker": ticker, "data": last_date,
+               "close": float(b["Close"]), "sma5": float(b["sma5"]),
+               "entry": entry, "stop": stop, "giorni": len(barre)}
+        return msg, posizione, last_date
+
+    # ── Nessuna posizione: cerca il segnale di ingresso ─────────────────────
+    if last["Close"] > last["sma200"] and last["rsi2"] < PB_RSI_SOGLIA:
+        domani = prossimo_giorno_usa(last_date)
+        if utili_il(chiave, domani):
+            msg = {"tipo": "SALTATO_UTILI", "nome": nome, "ticker": ticker,
+                   "data": last_date, "ingresso": domani}
+            return msg, None, last_date
+        msg = {"tipo": "ENTRATA", "nome": nome, "ticker": ticker, "data": last_date,
+               "ingresso": domani, "close": float(last["Close"]),
+               "rsi2": float(last["rsi2"]), "sma200": float(last["sma200"]),
+               "sma5": float(last["sma5"]), "atr": float(last["atr14"]),
+               "stop_dist": PB_ATR_STOP * float(last["atr14"]),
+               "eventi": eventi_del_giorno(domani)}
+        pos = {"entry_date": domani, "atr": float(last["atr14"]), "signal_date": last_date}
+        return msg, pos, last_date
+
+    return None, None, last_date

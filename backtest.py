@@ -3,6 +3,8 @@ BACKTEST — Simulazione storica delle strategie
 Esegui con: python3 backtest.py          (4 strategie storiche)
             python3 backtest.py orb      (confronto varianti ORB S&P500)
             python3 backtest.py azioni   (ORB su CAT e AVGO)
+            python3 backtest.py trend    (ritracciamento nel trend, S&P500 giornaliero)
+            python3 backtest.py trend_azioni   (stessa idea su CAT e AVGO)
 
 VERSIONE CORRETTA:
  - PF = profitti netti / perdite nette su TUTTI i trade (anche quelli "OPEN",
@@ -12,6 +14,7 @@ VERSIONE CORRETTA:
  - Max drawdown calcolato includendo il capitale iniziale.
  - Nuova colonna "Open" con il numero di trade chiusi a fine sessione.
 """
+import os
 import warnings
 warnings.filterwarnings("ignore")
 import numpy as np
@@ -23,7 +26,15 @@ import pytz
 ROME_TZ = pytz.timezone("Europe/Rome")
 ET_TZ = pytz.timezone("America/New_York")
 
-COSTS = {"SP500": 2.0, "GOLD": 2.5, "NASDAQ": 4.0, "WTI": 4.0, "AZIONI": 2.0}
+# Costo di spread andata+ritorno, in % del VALORE della posizione (non più € fissi).
+# Fonti: schermata ordine CFD S&P 500 (≈0,0187%) e KID Revolut del 28/04/2026:
+# indici ≈0,0042% (prudenziale 0,02%), azioni ≈0,0394%, materie prime ≈0,0375%.
+# Oro (schermata ordine XAU:CFD): spread 0,14$ su 1.785,82$ di esposizione ≈ 0,0078%
+#    (valore sotto prudenziale 0,01%). WTI: KID materie prime generico (≈0,0375%).
+# Spread e tasso variano per orario e strumento: ri-controlla nell'app.
+COSTS = {"SP500": 0.0002, "GOLD": 0.0001, "NASDAQ": 0.0002, "WTI": 0.0004, "AZIONI": 0.0004}
+# Stress test dei costi: COSTI_X=2 python3 backtest.py orb   (moltiplica gli spread)
+MOLTIPLICATORE_COSTI = float(os.environ.get("COSTI_X", "1") or 1)
 CAPITAL = 1000.0
 RISK_PCT = 0.01
 
@@ -98,7 +109,7 @@ def resample_4h(df):
 
 
 # ── Simulatore (CORRETTO) ─────────────────────────────────────────────────────
-def simulate(signals_df, cost_eur, label):
+def simulate(signals_df, cost_pct, label):
     capital = CAPITAL
     trades = []
     for _, row in signals_df.iterrows():
@@ -124,7 +135,8 @@ def simulate(signals_df, cost_eur, label):
             pnl_pts = (next_close - entry) * d; outcome = "OPEN"
 
         size = risk_eur / dist_sl
-        pnl_eur = pnl_pts * size - cost_eur
+        costo = size * entry * cost_pct * MOLTIPLICATORE_COSTI   # spread in % del valore posizione
+        pnl_eur = pnl_pts * size - costo
         capital += pnl_eur
         trades.append({"dir": "LONG" if d == 1 else "SHORT", "outcome": outcome,
                        "pnl_eur": pnl_eur, "capital": capital})
@@ -676,11 +688,11 @@ def print_results(results):
     print("─" * 72)
     print("\nLegenda:")
     print(" PF = profitti netti / perdite nette su tutti i trade, costi inclusi")
-    print(" Open = trade chiusi a fine sessione senza toccare stop né target")
+    print(" Open = trade chiusi senza toccare stop né target (a fine sessione; nel backtest trend: uscita per tempo)")
     print(" MaxDD = drawdown massimo % dal capitale iniziale")
     print(" Rend% = rendimento totale sul periodo testato")
     print("\n⚠️ Con pochi trade (meno di ~100) il PF non è statisticamente affidabile.")
-    print("⚠️ Spread+slippage Revolut inclusi nei calcoli.")
+    print("⚠️ Costi: spread in % del valore della posizione (schermata/KID Revolut). Stress test: COSTI_X=2.")
     print("⚠️ Fai sempre paper trading prima del denaro reale.\n")
 
 
@@ -816,9 +828,9 @@ def backtest_orb_regime():
 
 # ── ORB su azioni singole (stessa logica del bot live) ───────────────────────
 # Per CAT e AVGO. Le condizioni replicano check_orb_azione() di strategies.py.
-# Differenze: un solo trade al giorno; nessun TP1/break-even; costo fisso 2 €
-# (da adeguare allo spread reale di Revolut). ATR giornaliero calcolato solo
-# sulle candele già avvenute (nessun lookahead).
+# Differenze: un solo trade al giorno; nessun TP1/break-even; spread in % del valore
+# della posizione (KID azioni). ATR giornaliero calcolato solo sulle candele già
+# avvenute (nessun lookahead).
 def backtest_orb_azione(ticker, label, max_risk_pct=0.05, permetti_short=True):
     print(f"⏳ Backtest {label}...")
     df = get_data(ticker, "60d", "15m")
@@ -894,6 +906,188 @@ def backtest_orb_azione(ticker, label, max_risk_pct=0.05, permetti_short=True):
     return simulate(pd.DataFrame(signals), COSTS["AZIONI"], f"🏭 {label}")
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# RITRACCIAMENTO NEL TREND — S&P500 GIORNALIERO (RSI a 2 giorni)
+#
+# Idea classica di "mean reversion nel trend": nei mercati rialzisti i cali brevi
+# e violenti tendono a rientrare in pochi giorni.
+#   Trend:    chiusura sopra la media a 200 giorni
+#   Ingresso: RSI(2) < soglia (default 10) alla chiusura → compra all'APERTURA
+#             del giorno dopo (nessun lookahead, c'è il rischio gap)
+#   Uscita:   chiusura sopra la media a 5 giorni | stop = 3 × ATR(14) | max 10 giorni
+#   Solo long. Rischio per trade = RISK_PCT del capitale (size dallo stop).
+#
+# ⚠️ Costi: vedi le costanti qui sotto (derivate dal KID Revolut dei CFD su indici).
+# ⚠️ Non ho risultati reali: lancia `python3 backtest.py trend` e valuta tu.
+# ═════════════════════════════════════════════════════════════════════════════
+# Costi Revolut — fonti: schermata ordine CFD S&P 500 e KID CFD indici / azioni / materie prime (28/04/2026)
+#  Spread andata+ritorno, % del valore della posizione (il KID lo conta una volta per apri+chiudi):
+#   - S&P 500 (schermata): 0,27$ su 1.441,89$ di esposizione ≈ 0,0187%
+#   - KID esempio: indici 0,0042% | azioni 0,0394% | materie prime 0,0375%
+#  Commissione notturna LONG = posizione × (tasso base + mark-up Revolut 3%) / 365:
+#   - S&P 500 (schermata): 0,27$ su 1.441,89$ al giorno ≈ 0,0187% ≈ 6,8% annuo → tasso base ≈ 3,8%
+#   - Oro (schermata XAU:CFD): 0,26$ su 1.785,82$ al giorno ≈ 0,0146% ≈ 5,3% annuo (margine 5%)
+#   - KID esempio: indici/azioni 0,0182% al giorno ≈ 6,64% | materie prime 0,0164% ≈ 6,0%
+#   - Il weekend è coperto triplicando la commissione una volta a settimana: equivale ai giorni
+#     di calendario, come calcolato qui. Gli short ricevono circa tasso base − 3% (non usato: solo long).
+# ⚠️ Spread e tasso variano per strumento, orario e nel tempo: ri-controlla nell'app.
+TASSO_BASE_ANNUO = 0.038
+MARKUP_REVOLUT = 0.03
+COSTO_SPREAD_PCT = COSTS["SP500"]                          # ≈0,02% andata e ritorno
+FINANZIAMENTO_ANNUO = TASSO_BASE_ANNUO + MARKUP_REVOLUT   # ≈ 6,8% annuo per posizioni LONG
+
+
+def _trades_pullback(df, rsi_soglia=10, usa_filtro_trend=True, atr_stop=3.0, max_giorni=10,
+                     uscita_apertura_dopo=False):
+    d = df[["Open", "High", "Low", "Close"]].copy()
+    d["sma200"] = d["Close"].rolling(200).mean()
+    d["sma5"] = d["Close"].rolling(5).mean()
+    d["rsi2"] = rsi(d["Close"], 2)
+    d["atr"] = atr_calc(d, 14)
+    d.dropna(inplace=True)
+
+    O, H, L, C = d["Open"].values, d["High"].values, d["Low"].values, d["Close"].values
+    S5, S200, R2, A = d["sma5"].values, d["sma200"].values, d["rsi2"].values, d["atr"].values
+    dates = d.index
+    n = len(d)
+
+    trades = []
+    i = 0
+    while i < n - 1:
+        trend_ok = (C[i] > S200[i]) if usa_filtro_trend else True
+        if trend_ok and R2[i] < rsi_soglia:
+            e = i + 1                          # ingresso all'apertura del giorno dopo
+            entry = O[e]
+            stop = entry - atr_stop * A[i]
+            exit_j, ex, motivo = None, None, None
+            for j in range(e, n):
+                if O[j] <= stop:               # gap sotto lo stop: esce all'apertura
+                    ex, motivo = O[j], "stop"
+                elif L[j] <= stop:             # stop toccato durante il giorno
+                    ex, motivo = stop, "stop"
+                elif C[j] > S5[j]:             # rientro: chiusura sopra la media a 5 giorni
+                    ex, motivo = C[j], "uscita"
+                elif (j - e + 1) >= max_giorni:
+                    ex, motivo = C[j], "tempo"
+                else:
+                    continue
+                exit_j = j
+                break
+            if exit_j is None:
+                exit_j, ex, motivo = n - 1, C[n - 1], "fine dati"
+            elif uscita_apertura_dopo and motivo in ("uscita", "tempo") and exit_j + 1 < n:
+                # In live il segnale di uscita arriva a mercato chiuso: si esce all'apertura dopo
+                exit_j, ex = exit_j + 1, O[exit_j + 1]
+            trades.append({"entry_date": dates[e], "exit_date": dates[exit_j],
+                           "entry": entry, "stop": stop, "exit": ex, "motivo": motivo,
+                           "giorni": exit_j - e + 1})
+            i = exit_j + 1
+        else:
+            i += 1
+    return trades, dates[0], dates[-1], C[0], C[-1]
+
+
+# Azioni singole in CFD: spread ≈ 0,0394% (KID azioni, esempio a 254$); finanziamento come per gli indici.
+COSTI_AZIONI = {"spread": COSTS["AZIONI"], "finanz": FINANZIAMENTO_ANNUO}
+
+
+def _metriche_trades(trades, label, costo_spread=None, finanz=None):
+    costo_spread = COSTO_SPREAD_PCT if costo_spread is None else costo_spread
+    finanz = FINANZIAMENTO_ANNUO if finanz is None else finanz
+    if not trades:
+        return None
+    capital = CAPITAL
+    pnl_list, caps, giorni, stop_n, tempo_n = [], [], [], 0, 0
+    for t in trades:
+        dist = t["entry"] - t["stop"]
+        if dist <= 0:
+            continue
+        size = capital * RISK_PCT / dist
+        giorni_cal = max((t["exit_date"] - t["entry_date"]).days, 0)
+        costo = size * t["entry"] * (costo_spread + finanz * giorni_cal / 365)
+        pnl = (t["exit"] - t["entry"]) * size - costo
+        capital += pnl
+        pnl_list.append(pnl); caps.append(capital); giorni.append(t["giorni"])
+        stop_n += t["motivo"] == "stop"
+        tempo_n += t["motivo"] == "tempo"
+    if not pnl_list:
+        return None
+    s = pd.Series(pnl_list)
+    gross_p = s[s > 0].sum()
+    gross_l = abs(s[s <= 0].sum())
+    equity = pd.concat([pd.Series([CAPITAL]), pd.Series(caps)], ignore_index=True)
+    peak = equity.cummax()
+    return {"label": label, "trades": len(s), "open": int(tempo_n),
+            "win_rate": (s > 0).mean() * 100,
+            "pf": gross_p / gross_l if gross_l > 0 else float("inf"),
+            "max_dd": ((equity - peak) / peak * 100).min(),
+            "return": (capital - CAPITAL) / CAPITAL * 100, "final_cap": capital,
+            "giorni_medi": sum(giorni) / len(giorni), "stop": int(stop_n)}
+
+
+def backtest_pullback(ticker, nome, start="1993-01-01", costo_spread=None, finanz=None):
+    """Ritracciamento nel trend su qualsiasi titolo/indice giornaliero."""
+    print(f"⏳ Backtest RITRACCIAMENTO NEL TREND ({nome} giornaliero)...")
+    df = get_data(ticker, "max", "1d")
+    if df is None:
+        return None
+    if getattr(df.index, "tz", None) is not None:
+        df.index = df.index.tz_localize(None)
+    df = df[df.index >= start]
+
+    trades, d0, d1, c0, c1 = _trades_pullback(df)
+    if not trades:
+        print("  Nessun trade")
+        return None
+
+    cs = COSTO_SPREAD_PCT if costo_spread is None else costo_spread
+    fz = FINANZIAMENTO_ANNUO if finanz is None else finanz
+
+    # Dati "da parte": primo 70% del periodo = sviluppo, ultimo 30% = verifica
+    taglio = d0 + (d1 - d0) * 0.7
+    ins = [t for t in trades if t["entry_date"] < taglio]
+    oos = [t for t in trades if t["entry_date"] >= taglio]
+
+    def M(tr, lab, k=1.0):
+        return _metriche_trades(tr, lab, cs * k, fz * k)
+
+    risultati = [
+        M(ins, "Sviluppo (70%) RSI2<10"),
+        M(oos, "VERIFICA (30%) RSI2<10"),
+        M(_trades_pullback(df, rsi_soglia=5)[0], "Soglia 5 (tutto)"),
+        M(_trades_pullback(df, rsi_soglia=15)[0], "Soglia 15 (tutto)"),
+        M(_trades_pullback(df, usa_filtro_trend=False)[0], "Senza filtro SMA200"),
+        M(trades, "Tutto, costi x2", 2.0),
+        M(trades, "Tutto, costi x3", 3.0),
+        M(_trades_pullback(df, uscita_apertura_dopo=True)[0], "Uscita apertura dopo (live)"),
+    ]
+    risultati = [r for r in risultati if r is not None]
+
+    print(f"\n━━━━━━━━━━━━ {nome} ({ticker}) ━━━━━━━━━━━━")
+    print_results(risultati)
+    print(f"Periodo: {d0:%Y-%m-%d} → {d1:%Y-%m-%d}  |  Taglio sviluppo/verifica: {taglio:%Y-%m-%d}")
+    print(f"Costi usati: spread {cs * 100:.3f}% a trade + finanziamento {fz * 100:.1f}% annuo (da schermata/KID Revolut: ri-controlla nell'app)")
+    print(f"Buy & hold sullo stesso periodo: {(c1 / c0 - 1) * 100:+.0f}% (senza leva né costi)")
+    for r in risultati:
+        print(f" {r['label']:<28} giorni medi {r['giorni_medi']:.1f} | uscite per stop {r['stop']} | per tempo {r['open']}")
+    print("\nCome leggere: conta la riga VERIFICA. Le righe soglia 5/15 e 'senza filtro' mostrano")
+    print("se il risultato è stabile; le righe 'costi x2/x3' mostrano quanto regge se i costi")
+    print("reali sono più alti del previsto. Se il PF scende sotto ~1.1 con costi x2, è fragile.")
+    print("Rischio 1% per trade; i gap sui risultati trimestrali sono nei dati ma NON evitati.\n")
+    return risultati
+
+
+def backtest_pullback_sp500():
+    return backtest_pullback("^GSPC", "S&P 500")
+
+
+def backtest_pullback_azioni():
+    return [
+        backtest_pullback("CAT", "Caterpillar", costo_spread=COSTI_AZIONI["spread"], finanz=COSTI_AZIONI["finanz"]),
+        backtest_pullback("AVGO", "Broadcom", costo_spread=COSTI_AZIONI["spread"], finanz=COSTI_AZIONI["finanz"]),
+    ]
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "orb":
@@ -906,6 +1100,10 @@ if __name__ == "__main__":
             backtest_orb_regime(),
         ]
         print_results([r for r in results if r is not None])
+    elif len(sys.argv) > 1 and sys.argv[1] == "trend":
+        backtest_pullback_sp500()
+    elif len(sys.argv) > 1 and sys.argv[1] == "trend_azioni":
+        backtest_pullback_azioni()
     elif len(sys.argv) > 1 and sys.argv[1] == "azioni":
         print("🔍 Backtest ORB su azioni singole — circa 60 giorni di dati...\n")
         results = [

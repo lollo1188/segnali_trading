@@ -118,8 +118,75 @@ def send_telegram(signal: dict) -> bool:
     )
     return _send(msg)
 
-def send_startup_message():
+def _fmt_d(d):
+    return d.strftime("%d/%m")
+
+
+def send_pullback(m: dict) -> bool:
+    """Messaggi del ritracciamento giornaliero: entrata, mantieni, uscita, stop, utili."""
+    nome = m["nome"]
+    tipo = m["tipo"]
+    if tipo == "ENTRATA":
+        eventi = m.get("eventi") or []
+        riga_ev = f"⚠️ Domani in calendario: {', '.join(eventi)}\n" if eventi else ""
+        msg = (
+            f"📉 <b>RITRACCIAMENTO NEL TREND — {nome}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"Segnale a fine seduta del {_fmt_d(m['data'])}\n"
+            f"RSI(2) <b>{m['rsi2']:.1f}</b> (soglia 10) | chiusura <code>{m['close']:.2f}</code> "
+            f"sopra la media a 200 giorni (<code>{m['sma200']:.2f}</code>)\n\n"
+            f"➡️ <b>ENTRA LONG all'apertura USA del {_fmt_d(m['ingresso'])}</b> (15:30 italiane)\n"
+            f"🛑 Stop: prezzo d'ingresso − <code>{m['stop_dist']:.2f}</code> (3×ATR). "
+            f"Con ingresso a {m['close']:.2f} sarebbe ≈ <code>{m['close'] - m['stop_dist']:.2f}</code>\n"
+            f"🎯 Uscita: quando la chiusura supera la media a 5 giorni (ora <code>{m['sma5']:.2f}</code>), "
+            f"si vende all'apertura del giorno dopo. Massimo 10 giorni.\n"
+            f"📏 Size = (capitale × % rischio) / {m['stop_dist']:.2f}\n"
+            f"{riga_ev}"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"ℹ️ Strategia giornaliera, SOLO LONG, in prova (demo 4–8 settimane).\n"
+            f"ℹ️ Il bot non conosce le tue posizioni: seguirà una posizione teorica e ti avviserà ogni sera.\n"
+            f"🕐 Inviato {datetime.now(ROME_TZ).strftime('%d/%m %H:%M')}"
+        )
+    elif tipo == "MANTIENI":
+        msg = (
+            f"📉 <b>{nome} — posizione teorica, giorno {m['giorni']} di 10</b>\n"
+            f"Ingresso teorico <code>{m['entry']:.2f}</code> | stop teorico <code>{m['stop']:.2f}</code>\n"
+            f"Chiusura {_fmt_d(m['data'])} <code>{m['close']:.2f}</code> ≤ media 5gg <code>{m['sma5']:.2f}</code> → <b>mantieni</b>\n"
+            f"ℹ️ Se hai davvero aperto il CFD, tieni lo stop."
+        )
+    elif tipo in ("USCITA", "TEMPO"):
+        perche = ("la chiusura ha superato la media a 5 giorni "
+                  f"(<code>{m['close']:.2f}</code> > <code>{m['sma5']:.2f}</code>)") if tipo == "USCITA" \
+                 else "sono passati 10 giorni"
+        quando = "domani all'apertura USA" if m.get("recente", True) else "al più presto (l'evento è di un giorno fa)"
+        msg = (
+            f"✅ <b>{nome} — ESCI {quando}</b>\n"
+            f"Chiusura {_fmt_d(m['data'])}: {perche}. Giorno {m['giorni']}.\n"
+            f"Ingresso teorico <code>{m['entry']:.2f}</code>.\n"
+            f"ℹ️ Posizione teorica chiusa: aspetta il prossimo segnale."
+        )
+    elif tipo == "STOP":
+        msg = (
+            f"🛑 <b>{nome} — stop teorico toccato</b>\n"
+            f"Il {_fmt_d(m['data'])} il prezzo è sceso sotto <code>{m['stop']:.2f}</code> "
+            f"(ingresso teorico <code>{m['entry']:.2f}</code>).\n"
+            f"Se hai uno stop sul CFD dovrebbe essere già scattato: controlla l'app. "
+            f"Posizione teorica chiusa."
+        )
+    elif tipo == "SALTATO_UTILI":
+        msg = (
+            f"⏭ <b>{nome}</b>: segnale del {_fmt_d(m['data'])} SALTATO\n"
+            f"L'ingresso cadrebbe il {_fmt_d(m['ingresso'])}, giorno dei risultati trimestrali: "
+            f"gap e volatilità anomali non coperti dallo stop."
+        )
+    else:
+        return False
+    return _send(msg)
+
+
+def send_startup_message(spente=None):
     now = datetime.now(ROME_TZ).strftime("%d/%m/%Y %H:%M")
+    riga_spente = f"⏸ <b>Spente:</b> {', '.join(spente)}\n" if spente else ""
     msg = (
         f"🤖 <b>Trading Bot — Avviato</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -132,6 +199,9 @@ def send_startup_message():
         f"6️⃣ ORB Anthropic ANT 15min (sperimentale, senza backtest)\n"
         f"7️⃣ ORB Caterpillar CAT 15min (non validata)\n"
         f"8️⃣ ORB Broadcom AVGO 15min (non validata)\n"
+        f"9️⃣ Ritracciamento S&amp;P500 giornaliero (solo long, demo)\n"
+        f"🔟 Ritracciamento Broadcom AVGO giornaliero (solo long, demo)\n"
+        f"{riga_spente}"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"⚠️ Max 1.5% per trade | Max 4% totale\n"
         f"📅 Controlla ForexFactory ogni mattina\n"

@@ -16,6 +16,8 @@ Bot di segnali semi-automatico per i CFD di Revolut. Gira H24 su Railway e ti ma
 | 6 | ORB Anthropic | ANT (Nasdaq) | 15min | ORB adattata a un titolo singolo | 16:00–20:30 |
 | 7 | ORB Caterpillar | CAT (NYSE) | 15min | ORB adattata a un titolo singolo | 16:00–20:30 |
 | 8 | ORB Broadcom | AVGO (Nasdaq) | 15min | ORB adattata a un titolo singolo | 16:00–20:30 |
+| 9 | Ritracciamento S&P500 | S&P 500 | Giornaliero | RSI(2) < 10 sopra media 200gg, solo long | Controllo ~22:10 |
+| 10 | Ritracciamento Broadcom | AVGO | Giornaliero | Come sopra | Controllo ~22:10 |
 
 Le strategie 1, 2, 3, 6, 7 e 8 sono **intraday**: chiudi entro le 21:45 CET. Le strategie 4 e 5 possono restare aperte overnight.
 
@@ -38,6 +40,17 @@ Stessa logica dell'ORB S&P500 (breakout della candela delle 15:30 con VWAP, EMA2
 - ANT e AVGO sono entrambi legati al tema AI e AVGO si muove spesso con il Nasdaq: più segnali nella stessa direzione non sono indipendenti.
 - Non è verificato che Revolut offra i CFD su ANT, CAT e AVGO: controlla nell'app.
 
+### Ritracciamento nel trend giornaliero (9 e 10)
+
+Segnale a fine seduta USA, **ingresso all'apertura del giorno dopo**, solo long:
+- **Trend**: chiusura sopra la media a 200 giorni. **Ingresso**: RSI(2) sotto 10.
+- **Uscita**: la chiusura supera la media a 5 giorni (si vende all'apertura dopo), oppure stop a 3×ATR dall'ingresso, oppure massimo 10 giorni.
+- Il bot controlla alle 22:10 e alle 22:40 (lun–ven) e manda: **ENTRATA** (con stop e livello d'uscita), poi un promemoria serale **MANTIENI / ESCI / STOP**.
+- **Il bot non conosce le tue posizioni**: segue una posizione *teorica* dal segnale. Se non apri il CFD, ignora i promemoria. Dopo un riavvio la memoria si azzera e i promemoria si fermano: in quel caso gestisci l'uscita a mano con la regola sopra.
+- Se l'ingresso cade nel giorno dei risultati trimestrali (`UTILI` in `news_filter.py`) il segnale viene saltato e te lo dice. Se domani c'è un evento in calendario (NFP, CPI, FOMC) il messaggio lo segnala.
+- Risultati del backtest (`trend`, `trend_azioni`): S&P 500 PF ≈1,43 sia nello sviluppo sia nella verifica (506 trade dal 1993); AVGO PF 1,39 e 1,77 (270 trade dal 2010); **CAT non mostra vantaggio e non è inclusa**. Il vantaggio per trade è piccolo (circa +1% l'anno a rischio 1%) e AVGO è un titolo con un trend eccezionale: **prova solo in demo per 4–8 settimane**.
+- Il backtest esce alla chiusura, il live all'apertura del giorno dopo: la riga "Uscita apertura dopo (live)" di `python3 backtest.py trend` mostra quanto cambia.
+
 ---
 
 ## 🕐 Quando arrivano i segnali (ora italiana, lun–ven)
@@ -50,6 +63,7 @@ Stessa logica dell'ORB S&P500 (breakout della candela delle 15:30 con VWAP, EMA2
 | ORB ANT / CAT / AVGO | ~16:00–20:30 | Come sopra |
 | Kumo Rider Oro 4H | 00:20, 04:20, 08:20, 12:20, 16:20, 20:20 | Raro: serve un incrocio Ichimoku |
 | Kumo Rider Nasdaq 1H | ~17:05, 18:05, 19:05, 20:05 | Raro |
+| Ritracciamento S&P500 / AVGO | ~22:10 e 22:40, lun–ven | Pochi segnali all'anno; promemoria serali finché la posizione teorica è aperta |
 
 Sono finestre possibili, non garantite: il segnale arriva solo se le condizioni sono vere. Nel weekend e nei giorni festivi USA il bot è silenzioso. In più il filtro notizie (sotto) può saltare alcuni controlli.
 
@@ -174,6 +188,9 @@ La percentuale di rischio la decidi tu. La scritta "Rischia max 1.5%" nel messag
 python3 backtest.py        # 4 strategie storiche (Surfista, Pendolo, Rompighiaccio, Barile Caldo)
 python3 backtest.py orb    # confronto varianti ORB S&P500 (60 giorni)
 python3 backtest.py azioni # ORB su CAT e AVGO (60 giorni, un trade al giorno)
+python3 backtest.py trend  # ritracciamento nel trend, S&P500 giornaliero (dal 1993)
+python3 backtest.py trend_azioni  # stessa idea su CAT e AVGO (giornaliero)
+COSTI_X=2 python3 backtest.py orb # stress test: spread moltiplicati per 2
 ```
 
 Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine sessione senza toccare stop né target ("Open"), al netto dei costi. La colonna `Open` ti dice quanti sono.
@@ -183,7 +200,10 @@ Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine s
 - Il backtest non include le strategie VWAP Reversal, London Sweep e Kumo Rider: **i PF indicati nei commenti del codice non sono verificati da nessuno script del repository**.
 - Il backtest simula un solo trade al giorno e non gestisce il TP1 con break-even.
 - Nelle varianti ORB S&P500 il filtro sull'ampiezza dell'opening range usa l'ATR dell'intera giornata, quindi anche candele future (lookahead). Il backtest `azioni` non ha questo difetto.
-- Nessun backtest include il filtro notizie né i costi reali di Revolut: il costo è un importo fisso per operazione.
+- Nessun backtest include il filtro notizie.
+- **Costi**: spread in % del valore della posizione, ricavati dalla schermata d'ordine del CFD S&P 500 (≈0,019% andata e ritorno) e dai KID Revolut del 28/04/2026 (azioni ≈0,039%, materie prime ≈0,038%, indici ≈0,004%). Commissione notturna long = valore × (tasso base ≈3,8% + mark-up 3%) / 365, cioè ≈6,8% annuo, usata nei backtest giornalieri. **Oro** (schermata ordine XAU:CFD): spread ≈0,008% andata e ritorno, commissione notturna long ≈0,015% al giorno (≈5,3% annuo), margine 5%. Spread e tasso variano per orario e strumento: ricontrollali nell'app.
+- Backtest `trend_azioni` (giornaliero, costi attuali: spread 0,04% e finanziamento 6,8% annuo): **CAT** non mostra vantaggio (PF 0,90 sviluppo e 0,92 verifica, sotto 1 anche con soglie diverse). **AVGO** sì: PF 1,39 sviluppo, 1,77 verifica, 270 trade dal 2010, e resta a 1,26 con costi tripli. Ma il rendimento è piccolo (circa +17% in 16 anni, ≈1% l'anno a rischio 1% per trade, in mercato per circa il 15% dei giorni) e funziona anche senza filtro sulla media a 200 giorni: gran parte del vantaggio può dipendere dal trend eccezionale del titolo (scelto col senno di poi) più che dalla regola. I gap sui risultati trimestrali sono nei dati ma non evitati.
+- Backtest ORB (60 giorni, costi in % da schermata/KID): CAT PF 1,25 (36 trade), AVGO PF 1,30 (46 trade), S&P 500 PF 1,00 (48 trade); le altre varianti S&P hanno 3–28 trade. Con campioni così piccoli e un solo periodo di mercato **non dimostrano un vantaggio**: l'ORB resta non validata. Quasi tre quarti dei trade chiudono a fine sessione senza toccare stop né target.
 - Per ANT non esiste storico sufficiente: nessun backtest possibile.
 
 ---
@@ -230,6 +250,7 @@ Variabili **opzionali** (strategie su azioni):
 
 - `ANT_ABILITA_SHORT`, `CAT_ABILITA_SHORT`, `AVGO_ABILITA_SHORT` = `1` o `0` (default: ANT `0`, CAT e AVGO `1`)
 - `TICKER_ANT`, `TICKER_CAT`, `TICKER_AVGO` = simbolo Yahoo Finance, se diverso da quello predefinito
+- `STRATEGIE_SPENTE` = elenco di strategie da **spegnere**, separate da virgole (es. `orb_cat,orb_avgo`). Nomi validi: `vwap_gold`, `london_sweep`, `orb_sp500`, `orb_ant`, `orb_cat`, `orb_avgo`, `kumo_gold_4h`, `kumo_nasdaq`, `pullback_sp500`, `pullback_avgo`. Variabile assente o vuota = tutte attive. Per riaccenderle togli il nome: Railway riavvia il bot da solo. Il messaggio di avvio su Telegram mostra quali sono spente.
 
 Railway riavvia il bot da solo.
 

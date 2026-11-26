@@ -43,7 +43,7 @@ try:
     from strategies import (
         check_vwap_reversal_gold, check_london_sweep_gold,
         check_orb_sp500, check_kumo_gold_4h, check_kumo_nasdaq_1h,
-        check_orb_ant, check_orb_cat, check_orb_avgo,
+        check_orb_ant, check_orb_cat, check_orb_avgo, analizza_pullback,
         get_last_price, fmt, TICKER_GOLD, TICKER_SP500, TICKER_NASDAQ,
         TICKER_ANT, TICKER_CAT, TICKER_AVGO,
     )
@@ -52,7 +52,7 @@ except Exception as e:
     logger.error(f"Errore import strategies: {e}")
 
 try:
-    from notifier import send_telegram, send_startup_message
+    from notifier import send_telegram, send_startup_message, send_pullback
     logger.info("Notifier importato OK")
 except Exception as e:
     logger.error(f"Errore import notifier: {e}")
@@ -80,7 +80,34 @@ SIGNAL_TICKER = {
     "orb_ant": TICKER_ANT,
     "orb_cat": TICKER_CAT,
     "orb_avgo": TICKER_AVGO,
+    "pullback_sp500": TICKER_SP500,
+    "pullback_avgo": TICKER_AVGO,
 }
+
+
+# ── Interruttore strategie ────────────────────────────────────────────────────
+# Per SPEGNERE strategie senza toccare il codice: su Railway → Variables aggiungi
+#   STRATEGIE_SPENTE = orb_cat,orb_avgo
+# Nomi validi: vwap_gold, london_sweep, orb_sp500, orb_ant, orb_cat, orb_avgo,
+#              kumo_gold_4h, kumo_nasdaq
+# Variabile assente o vuota = tutte attive. Per riaccenderle togli il nome dall'elenco
+# (Railway riavvia il bot da solo).
+NOMI_STRATEGIE = list(SIGNAL_TICKER.keys())
+
+
+def _leggi_spente():
+    grezzo = os.environ.get("STRATEGIE_SPENTE", "")
+    nomi = {x.strip().lower() for x in grezzo.replace(";", ",").replace(" ", ",").split(",") if x.strip()}
+    sconosciute = nomi - set(NOMI_STRATEGIE)
+    if sconosciute:
+        logger.warning(f"STRATEGIE_SPENTE: nomi non riconosciuti (ignorati): {sorted(sconosciute)}. "
+                       f"Nomi validi: {NOMI_STRATEGIE}")
+    return nomi & set(NOMI_STRATEGIE)
+
+
+STRATEGIE_SPENTE = _leggi_spente()
+if STRATEGIE_SPENTE:
+    logger.info(f"Strategie SPENTE da STRATEGIE_SPENTE: {sorted(STRATEGIE_SPENTE)}")
 
 
 def should_send(name, direction, cooldown_h=4):
@@ -112,6 +139,8 @@ def _pianifica_ripetizione(name, fn, cooldown_h):
 
 
 def run_check(name, fn, cooldown_h=4):
+    if name in STRATEGIE_SPENTE:
+        return
     try:
         if is_news_window(name):
             logger.info(f"[{name}] Filtro notizie attivo: {motivo_blocco(name)}")
@@ -174,6 +203,50 @@ def job_orb_avgo():
     _job_orb_azione("orb_avgo", "Broadcom (AVGO)", check_orb_avgo)
 
 
+# ── Ritracciamento nel trend (giornaliero) ────────────────────────────────────
+# name -> (ticker, nome mostrato). Controllo ogni sera dopo la chiusura USA.
+PULLBACK = {
+    "pullback_sp500": (TICKER_SP500, "S&P 500"),
+    "pullback_avgo": (TICKER_AVGO, "Broadcom (AVGO)"),
+}
+posizioni_pb: dict = {}      # posizione TEORICA per strategia (si azzera ai riavvii)
+ultimo_pb: dict = {}         # data dell'ultima candela già elaborata
+
+
+def job_pullback(name):
+    if name in STRATEGIE_SPENTE:
+        return
+    ticker, nome = PULLBACK[name]
+    try:
+        logger.info(f"▶ Ritracciamento {nome}")
+        msg, pos, data = analizza_pullback(ticker, name, nome, posizioni_pb.get(name))
+        if data is None:
+            logger.info(f"[{name}] Candela giornaliera non ancora disponibile (si riprova)")
+            return
+        if ultimo_pb.get(name) == data:
+            return                                   # già elaborata (secondo controllo serale)
+        ultimo_pb[name] = data
+        if pos:
+            posizioni_pb[name] = pos
+        else:
+            posizioni_pb.pop(name, None)
+        if msg and send_pullback(msg):
+            logger.info(f"[{name}] Messaggio inviato: {msg['tipo']}")
+        elif msg:
+            logger.error(f"[{name}] Invio Telegram fallito")
+    except Exception as e:
+        logger.error(f"[{name}] Errore: {type(e).__name__}: {e}")
+
+
+def job_pullback_sp500():
+    job_pullback("pullback_sp500")
+
+
+def job_pullback_avgo():
+    job_pullback("pullback_avgo")
+
+
+
 def job_kumo_gold_4h():
     logger.info("▶ Kumo Rider Oro 4H")
     run_check("kumo_gold_4h", check_kumo_gold_4h, 12)
@@ -188,27 +261,41 @@ def job_kumo_nasdaq():
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 logger.info("═══════════════════════════════════════")
-logger.info(" TRADING BOT — 8 Strategie")
+logger.info(f" TRADING BOT — {len(NOMI_STRATEGIE) - len(STRATEGIE_SPENTE)} strategie attive su {len(NOMI_STRATEGIE)}")
 logger.info("═══════════════════════════════════════")
 
 try:
     scheduler = BackgroundScheduler(timezone=ROME_TZ)
     scheduler.add_listener(lambda e: logger.error(f"Job error: {e.exception}"), EVENT_JOB_ERROR)
-    scheduler.add_job(job_vwap_gold, "interval", minutes=15, id="vwap_gold")
-    scheduler.add_job(job_london_sweep, "interval", minutes=15, id="london_sweep")
-    scheduler.add_job(job_orb_sp500, "interval", minutes=15, id="orb_sp500")
-    scheduler.add_job(job_orb_ant, "interval", minutes=15, id="orb_ant")
-    scheduler.add_job(job_orb_cat, "interval", minutes=15, id="orb_cat")
-    scheduler.add_job(job_orb_avgo, "interval", minutes=15, id="orb_avgo")
-    scheduler.add_job(job_kumo_gold_4h, "cron", hour="0,4,8,12,16,20", minute=20, id="kumo_gold_4h")
-    scheduler.add_job(job_kumo_nasdaq, "cron", minute=5, id="kumo_nasdaq")
+    def _aggiungi_job(funzione, nome, trigger, **kwargs):
+        if nome in STRATEGIE_SPENTE:
+            logger.info(f"[{nome}] SPENTA: job non avviato")
+            return
+        scheduler.add_job(funzione, trigger, id=nome, **kwargs)
+
+    _aggiungi_job(job_vwap_gold, "vwap_gold", "interval", minutes=15)
+    _aggiungi_job(job_london_sweep, "london_sweep", "interval", minutes=15)
+    _aggiungi_job(job_orb_sp500, "orb_sp500", "interval", minutes=15)
+    _aggiungi_job(job_orb_ant, "orb_ant", "interval", minutes=15)
+    _aggiungi_job(job_orb_cat, "orb_cat", "interval", minutes=15)
+    _aggiungi_job(job_orb_avgo, "orb_avgo", "interval", minutes=15)
+    _aggiungi_job(job_kumo_gold_4h, "kumo_gold_4h", "cron", hour="0,4,8,12,16,20", minute=20)
+    _aggiungi_job(job_kumo_nasdaq, "kumo_nasdaq", "cron", minute=5)
+    # Ritracciamento giornaliero: dopo la chiusura USA (22:00 italiane, 21:00 nelle settimane
+    # con ora legale sfasata). Due controlli: se Yahoo è in ritardo il secondo recupera.
+    for _ora, _min, _suf in ((22, 10, "a"), (22, 40, "b")):
+        for _nome, _fn in (("pullback_sp500", job_pullback_sp500), ("pullback_avgo", job_pullback_avgo)):
+            if _nome in STRATEGIE_SPENTE:
+                continue
+            scheduler.add_job(_fn, "cron", day_of_week="mon-fri", hour=_ora, minute=_min,
+                              id=f"{_nome}_{_suf}")
     scheduler.start()
     logger.info("Scheduler avviato")
 except Exception as e:
     logger.error(f"Errore scheduler: {e}")
 
 try:
-    if send_startup_message():
+    if send_startup_message(sorted(STRATEGIE_SPENTE)):
         logger.info("Messaggio avvio inviato")
     else:
         logger.error("Messaggio avvio NON inviato (vedi errore Telegram sopra)")
