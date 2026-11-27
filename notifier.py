@@ -100,7 +100,6 @@ def _blocco_distanze(signal: dict) -> str:
     except (KeyError, TypeError, ValueError):
         return ""
     is_long = signal.get("direzione") == "LONG"
-    segno = 1 if is_long else -1
     parti = [f"stop <code>{sl - entry:+.2f}</code>"]
     try:
         if signal.get("tp1"):
@@ -120,7 +119,6 @@ def _blocco_distanze(signal: dict) -> str:
 
 def send_telegram(signal: dict) -> bool:
     now  = datetime.now(ROME_TZ).strftime("%d/%m %H:%M")
-    tipo = "🟢 LONG" if signal.get("direzione") == "LONG" else "🔴 SHORT"
     chiudi = signal.get("chiudi_entro", "21:45")
     overnight = "⏰ <b>SWING — può restare overnight</b>" if "4H" in signal.get("timeframe","") or "1H" in signal.get("timeframe","") else f"⏱ <b>INTRADAY — chiudi entro le {chiudi} (ora italiana)</b>"
 
@@ -228,11 +226,11 @@ def send_startup_message(spente=None, nota_stato=""):
         f"🤖 <b>Trading Bot — Avviato</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"<b>Strategie attive:</b>\n"
-        f"1️⃣ VWAP Reversal Oro 15min (PF 1.84)\n"
-        f"2️⃣ London Sweep Oro 08-10 CET (PF 1.55)\n"
-        f"3️⃣ ORB S&amp;P500 15min (PF 1.40)\n"
-        f"4️⃣ Kumo Rider Oro 4H swing (PF 1.62)\n"
-        f"5️⃣ Kumo Rider Nasdaq 1H swing (PF 1.51)\n"
+        f"1️⃣ VWAP Reversal Oro 15min (backtest: non dimostrata)\n"
+        f"2️⃣ London Sweep Oro 08-10 (backtest: in perdita)\n"
+        f"3️⃣ ORB S&amp;P500 15min (backtest: nessun vantaggio)\n"
+        f"4️⃣ Kumo Rider Oro 4H swing (backtest: in perdita)\n"
+        f"5️⃣ Kumo Rider Nasdaq 1H swing (backtest: in perdita)\n"
         f"6️⃣ ORB Anthropic ANT 15min (sperimentale, senza backtest)\n"
         f"7️⃣ ORB Caterpillar CAT 15min (non validata)\n"
         f"8️⃣ ORB Broadcom AVGO 15min (non validata)\n"

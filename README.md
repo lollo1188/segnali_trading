@@ -6,7 +6,7 @@ Bot di segnali semi-automatico per i CFD di Revolut. Gira H24 su Railway e ti ma
 
 ## ⚙️ Strategie incluse
 
-| # | Nome | Asset | Timeframe | Logica | Finestra CET |
+| # | Nome | Asset | Timeframe | Logica | Finestra (ora italiana) |
 |---|------|-------|-----------|--------|--------------|
 | 1 | VWAP Reversal | Oro | 15min | Prezzo oltre ±2σ dal VWAP + RSI estremo + candela di inversione | 08:00–21:45 |
 | 2 | London Sweep | Oro | 15min | Falso breakdown del range asiatico (06:00–08:00) | 08:00–10:00 |
@@ -19,9 +19,9 @@ Bot di segnali semi-automatico per i CFD di Revolut. Gira H24 su Railway e ti ma
 | 9 | Ritracciamento S&P500 | S&P 500 | Giornaliero | RSI(2) < 10 sopra media 200gg, solo long | Controllo ~22:10 |
 | 10 | Ritracciamento Broadcom | AVGO | Giornaliero | Come sopra | Controllo ~22:10 |
 
-Le strategie 1, 2, 3, 6, 7 e 8 sono **intraday**: chiudi entro le 21:45 CET. Le strategie 4 e 5 possono restare aperte overnight.
+Le strategie 1, 2, 3, 6, 7 e 8 sono **intraday**: chiudi entro l'ora indicata nel messaggio (21:45 italiane; per le strategie USA 20:45 nelle settimane con ora legale sfasata). Le strategie 4 e 5 possono restare aperte overnight. Gli orari delle strategie USA (3, 5, 6–10) seguono l'ora di New York: vedi *Quando arrivano i segnali*.
 
-Dopo un segnale, la stessa strategia nella stessa direzione non viene riproposta per un periodo di pausa (4–12 ore a seconda della strategia). Questa pausa è salvata nel file di stato (vedi *Memoria del bot* sotto) e sopravvive ai riavvii.
+Dopo un segnale, la stessa strategia nella stessa direzione non viene riproposta per un periodo di pausa (4–12 ore a seconda della strategia). Questa pausa è salvata nel file di stato e sopravvive ai riavvii, se su Railway c'è il volume `/data` (vedi STEP 4b).
 
 ### Strategie su azioni singole (6, 7, 8)
 
@@ -36,7 +36,7 @@ Stessa logica dell'ORB S&P500 (breakout della candela delle 15:30 con VWAP, EMA2
 - Il segnale parte solo se la candela è di oggi e chiusa da meno di 25 minuti (evita dati vecchi in giorni festivi o mezze sedute).
 - Gli stop massimi in percentuale sono valori **arbitrari**, non ottimizzati.
 - Tutti i parametri sono **non validati**: usa solo demo o rischio minimo.
-- **Evita i giorni dei risultati trimestrali**: il bot non conosce le date degli utili e quei giorni hanno gap e volatilità anomali.
+- **Giorni dei risultati trimestrali**: il bot li salta in automatico solo se la data è in `UTILI` di `news_filter.py` (oggi AVGO 10/12/2026 e CAT 28/1/2027; ANT non ancora). Quei giorni hanno gap e volatilità anomali: aggiorna il calendario a ogni trimestre.
 - ANT e AVGO sono entrambi legati al tema AI e AVGO si muove spesso con il Nasdaq: più segnali nella stessa direzione non sono indipendenti.
 - Non è verificato che Revolut offra i CFD su ANT, CAT e AVGO: controlla nell'app.
 
@@ -59,11 +59,11 @@ Le strategie USA (ORB, Kumo Nasdaq, ritracciamento) seguono l'**ora di New York*
 
 | Strategia | Orari possibili | Note |
 |-----------|-----------------|------|
-| VWAP Reversal Oro | ~08:15–22:00 | Controllo ogni 15 min |
+| VWAP Reversal Oro | ~08:15–21:45 | Controllo ogni 15 min; ultima candela 21:15 |
 | London Sweep Oro | ~08:30–10:00 | Solo long |
 | ORB S&P500 | ~16:00–21:45 | Al massimo uno al giorno per direzione |
 | ORB ANT / CAT / AVGO | ~16:00–20:30 | Come sopra |
-| Kumo Rider Oro 4H | 00:20, 04:20, 08:20, 12:20, 16:20, 20:20 | Raro: serve un incrocio Ichimoku |
+| Kumo Rider Oro 4H | ~20 minuti dopo la chiusura di una candela 4H (controllo ogni ora) | Raro: serve un incrocio Ichimoku |
 | Kumo Rider Nasdaq 1H | ~17:05, 18:05, 19:05, 20:05 | Raro |
 | Ritracciamento S&P500 / AVGO | ~22:10 e 22:40, lun–ven | Pochi segnali all'anno; promemoria serali finché la posizione teorica è aperta |
 
@@ -201,6 +201,8 @@ python3 backtest.py orb    # confronto varianti ORB S&P500 (60 giorni)
 python3 backtest.py azioni # ORB su CAT e AVGO (60 giorni, un trade al giorno)
 python3 backtest.py trend  # ritracciamento nel trend, S&P500 giornaliero (dal 1993)
 python3 backtest.py trend_azioni  # stessa idea su CAT e AVGO (giornaliero)
+python3 backtest.py bot    # strategie 1, 2, 4, 5 del bot: VWAP Reversal, London Sweep, Kumo Oro 4H e Nasdaq 1H
+python3 verifica_backtest.py  # controlla che bot e backtest diano gli stessi segnali (strategie 1, 2, 4, 5)
 COSTI_X=2 python3 backtest.py orb # stress test: spread moltiplicati per 2
 ```
 
@@ -208,7 +210,10 @@ Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine s
 
 **Limiti da tenere presenti:**
 - Per i dati a 15 minuti Yahoo Finance fornisce solo circa 60 giorni: l'ORB viene testato su poche decine di trade, troppo poche per un PF affidabile.
-- Il backtest non include le strategie VWAP Reversal, London Sweep e Kumo Rider: **i PF indicati nei commenti del codice non sono verificati da nessuno script del repository**.
+- Backtest `bot` (eseguito il 27/11/2026, costi Revolut attuali): **VWAP Reversal Oro** PF 1,71 su 10 trade (60 giorni); **London Sweep Oro** PF 0,69 su 8 trade (60 giorni); **Kumo Rider Oro 4H** PF 0,83 su 10 trade (2 anni); **Kumo Rider Nasdaq 1H** PF 0,00 su 4 trade (2 anni, tutti in perdita). Con costi raddoppiati (`COSTI_X=2`) i risultati cambiano poco. Campioni minuscoli: **nessuna delle quattro dimostra un vantaggio**, e tre su quattro sono sotto 1. I PF scritti in passato (1.84, 1.55, 1.62, 1.51) non sono confermati.
+  - Semplificazioni: London Sweep senza TP1 al 50% e trailing; Kumo senza commissione notturna e con uscita forzata dopo circa 10 giorni; se nella stessa candela si toccano stop e target conta lo stop.
+  - Il backtest Kumo usa la regola chikou standard (chiusura attuale contro quella di 26 candele prima) sull'ultima candela chiusa, come il bot dopo la correzione del 27/11/2026.
+  - **Bot e backtest coincidono**: `python3 verifica_backtest.py` riesegue le funzioni del bot su ogni controllo storico (stessi orari dello scheduler, stessi dati che Yahoo dava in quel momento, stesse pause tra segnali) e le confronta con il backtest. Al 27/11/2026: stessi segnali e stessi prezzi per tutte e quattro le strategie. Il Kumo Oro arriva 20 minuti dopo la chiusura della candela.
 - Il backtest simula un solo trade al giorno e non gestisce il TP1 con break-even.
 - Nelle varianti ORB S&P500 il filtro sull'ampiezza dell'opening range usa l'ATR dell'intera giornata, quindi anche candele future (lookahead). Il backtest `azioni` non ha questo difetto.
 - Nessun backtest include il filtro notizie.
@@ -224,7 +229,7 @@ Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine s
 - **Dati Yahoo Finance**, non il prezzo del CFD di Revolut. Per l'oro è il future, con prezzi diversi dallo spot: usa le distanze.
 - I controlli girano ogni 15 minuti dall'avvio, non allineati alle candele: l'entry può essere vecchia fino a circa 15 minuti. Per questo esiste il blocco slittamento.
 - Il backtest (`backtest.py`) usa ancora l'opening range delle 15:30 italiane: nelle settimane con ora legale sfasata simula la candela sbagliata (pochi giorni l'anno, effetto piccolo).
-- Il bot non conosce i giorni festivi o le mezze sedute di Wall Street. Le strategie su azioni (6, 7, 8) controllano che la candela sia recente; le altre no, e in quei giorni possono proporre segnali basati su candele vecchie. Ignorali.
+- Festivi e mezze sedute di Wall Street sono bloccati dal filtro notizie solo se sono nel calendario di `news_filter.py` (oggi fino a fine 2027). Le strategie su azioni (6, 7, 8) controllano anche che la candela sia recente; le altre no, quindi con una data mancante possono proporre segnali su candele vecchie. Ignorali.
 - Il filtro notizie dipende da un calendario che aggiorni tu e non copre le notizie impreviste (vedi sezione dedicata).
 - Non segue le operazioni: non controlla stop e target e non ti avvisa del TP1 o della chiusura serale.
 - Il limite "max 4% totale" nel messaggio di avvio è solo un promemoria.

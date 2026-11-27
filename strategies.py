@@ -1,14 +1,20 @@
 """
 STRATEGIE DI TRADING
-1. VWAP Reversal Oro 15min (PF 1.84) — intraday
-2. London Liquidity Sweep Oro (PF 1.55) — intraday
-3. ORB S&P500 15min (PF 1.40) — intraday
-4. Kumo Rider Oro 4H (PF 1.62) — swing overnight OK
-5. Kumo Rider Nasdaq 1H (PF 1.51) — swing overnight OK
-6. ORB Anthropic ANT 15min — intraday (SPERIMENTALE: nessun backtest possibile)
+1. VWAP Reversal Oro 15min — intraday (backtest 60 giorni: PF 1,71 su 10 trade, campione troppo piccolo)
+2. London Liquidity Sweep Oro — intraday (backtest 60 giorni: PF 0,69 su 8 trade)
+3. ORB S&P500 15min — intraday (backtest 60 giorni: PF ≈1,00, nessun vantaggio)
+4. Kumo Rider Oro 4H — swing overnight OK (backtest 2 anni: PF 0,83 su 10 trade)
+5. Kumo Rider Nasdaq 1H — swing overnight OK (backtest 2 anni: 4 trade, tutti in perdita)
+6. ORB Anthropic ANT 15min — intraday (SPERIMENTALE: storico troppo breve per un backtest)
 7. ORB Caterpillar CAT 15min — intraday (non validata: usa backtest.py azioni)
 8. ORB Broadcom AVGO 15min — intraday (non validata: usa backtest.py azioni)
 9-10. Ritracciamento nel trend giornaliero S&P 500 e AVGO — solo long
+     (backtest: S&P 500 PF ≈1,43, AVGO PF 1,39–1,77; vantaggio piccolo)
+
+I PF scritti in passato per le strategie 1-5 (1.84, 1.55, 1.40, 1.62, 1.51) non
+erano confermati da nessuno script del repository e sono stati tolti. Risultati
+attuali: `python3 backtest.py bot` (1, 2, 4, 5) e `python3 backtest.py orb` (3).
+`python3 verifica_backtest.py` controlla che il bot e il backtest diano gli stessi segnali.
 
 Orari: le strategie USA (ORB, Kumo Nasdaq, ritracciamento) usano l'ORA DI NEW YORK,
 così restano agganciate all'apertura di Wall Street anche nelle settimane in cui
@@ -22,7 +28,6 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-import requests
 import yfinance as yf
 import pytz
 
@@ -150,7 +155,7 @@ def ichimoku(df: pd.DataFrame, tenkan=9, kijun=26, senkou_b=52, disp=26):
     k_sen = (h.rolling(kijun).max() + l.rolling(kijun).min()) / 2
     s_a = ((t_sen + k_sen) / 2).shift(disp)
     s_b = ((h.rolling(senkou_b).max() + l.rolling(senkou_b).min()) / 2).shift(disp)
-    chikou = df["Close"].shift(-disp)
+    chikou = df["Close"].shift(-disp)   # ⚠️ guarda nel futuro: non usarlo per i segnali
     return t_sen, k_sen, s_a, s_b, chikou
 
 
@@ -177,7 +182,7 @@ def candle_label(ts, minutes: int) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STRATEGIA 1 — VWAP REVERSAL ORO 15min (PF 1.84)
+# STRATEGIA 1 — VWAP REVERSAL ORO 15min (backtest: PF 1,71 su 10 trade, non dimostrata)
 # Intraday — chiusura entro 21:45 CET
 # Prezzo esteso oltre +2σ/−2σ VWAP + RSI estremo + candela di inversione
 # ══════════════════════════════════════════════════════════════════════════════
@@ -194,9 +199,11 @@ def check_vwap_reversal_gold() -> Optional[dict]:
     if len(df) < 3:
         return None
 
-    # Usa [-2] = ultima candela CHIUSA, [-1] è ancora in formazione
+    # Usa [-2] = ultima candela CHIUSA, [-1] è ancora in formazione.
+    # Ultima candela valutata: 21:15 (si chiude alle 21:30), così il segnale arriva
+    # prima delle 21:45, l'ora di chiusura delle intraday.
     last_cet = df.index[-2].tz_convert(ROME_TZ)
-    if not (time(8, 0) <= last_cet.time() <= time(21, 45)):
+    if not (time(8, 0) <= last_cet.time() <= time(21, 15)):
         return None
 
     curr = df.iloc[-2]
@@ -250,7 +257,7 @@ def check_vwap_reversal_gold() -> Optional[dict]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STRATEGIA 2 — LONDON LIQUIDITY SWEEP ORO (PF 1.55)
+# STRATEGIA 2 — LONDON LIQUIDITY SWEEP ORO (backtest: PF 0,69 su 8 trade)
 # Intraday — finestra 08:00-10:00 CET
 # Falso breakdown del range asiatico 06:00-08:00 → entrata LONG
 # ══════════════════════════════════════════════════════════════════════════════
@@ -288,7 +295,6 @@ def check_london_sweep_gold() -> Optional[dict]:
 
     # Usa [-2] = ultima candela chiusa, [-1] è ancora in formazione
     curr = window.iloc[-2]
-    a = curr["atr14"]
 
     # Sweep: candela corrente ha toccato sotto asia_low di $2-$5
     sweep_depth = asia_low - curr["Low"]
@@ -327,7 +333,7 @@ def check_london_sweep_gold() -> Optional[dict]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STRATEGIA 3 — ORB S&P500 15min (PF 1.40)
+# STRATEGIA 3 — ORB S&P500 15min (backtest 60 giorni: PF ≈1,00, 48 trade)
 # Intraday — OR = prima candela 09:30 ET (15:30 italiane), ingressi 09:45-15:45 ET
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -428,7 +434,7 @@ def check_orb_sp500() -> Optional[dict]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STRATEGIA 4 — KUMO RIDER ORO 4H (PF 1.62)
+# STRATEGIA 4 — KUMO RIDER ORO 4H (backtest: PF 0,83 su 10 trade)
 # Swing — overnight OK se segnale forte
 # Ichimoku 9/26/52 + RSI 40-65
 # ══════════════════════════════════════════════════════════════════════════════
@@ -442,12 +448,16 @@ def check_kumo_gold_4h() -> Optional[dict]:
     if len(df) < 60:
         return None
 
-    t_sen, k_sen, s_a, s_b, chikou = ichimoku(df)
+    t_sen, k_sen, s_a, s_b, _ = ichimoku(df)
     df["t_sen"] = t_sen
     df["k_sen"] = k_sen
     df["s_a"] = s_a
     df["s_b"] = s_b
-    df["chikou"] = chikou
+    # Chikou (regola standard): chiusura attuale contro quella di 26 candele prima.
+    # NON usare il chikou "spostato nel futuro" (Close.shift(-26)): per le candele
+    # recenti è vuoto, dropna() le scarta e il bot valuterebbe una candela di 27
+    # periodi fa (errore corretto il 27/11/2026).
+    df["c_26"] = df["Close"].shift(26)
     df["rsi14"] = rsi(df["Close"], 14)
     df["atr14"] = atr(df, 14)
     df.dropna(inplace=True)
@@ -464,11 +474,10 @@ def check_kumo_gold_4h() -> Optional[dict]:
     cross_dn = prev["t_sen"] >= prev["k_sen"] and curr["t_sen"] < curr["k_sen"]
     entry = curr["Close"]
     a = curr["atr14"]
-    chikou_ref = df["Close"].iloc[-28] if len(df) > 28 else df["Close"].iloc[0]
 
     if (cross_up and entry > kumo_top and
             40 < curr["rsi14"] < 65 and
-            curr["chikou"] > chikou_ref and
+            entry > curr["c_26"] and
             curr["t_sen"] > curr["s_a"] and curr["t_sen"] > curr["s_b"]):
         sl = curr["k_sen"] - 0.3 * a
         risk = entry - sl
@@ -490,7 +499,7 @@ def check_kumo_gold_4h() -> Optional[dict]:
 
     if (cross_dn and entry < kumo_bot and
             35 < curr["rsi14"] < 60 and
-            curr["chikou"] < chikou_ref and
+            entry < curr["c_26"] and
             curr["t_sen"] < curr["s_a"] and curr["t_sen"] < curr["s_b"]):
         sl = curr["k_sen"] + 0.3 * a
         risk = sl - entry
@@ -514,7 +523,7 @@ def check_kumo_gold_4h() -> Optional[dict]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STRATEGIA 5 — KUMO RIDER NASDAQ 1H (PF 1.51)
+# STRATEGIA 5 — KUMO RIDER NASDAQ 1H (backtest: 4 trade, tutti in perdita)
 # Swing — overnight OK se segnale forte
 # Ichimoku 9/26/52 + RSI 40-65 + filtro orario 09:30-15:00 ET (15:30-21:00 italiane)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -524,12 +533,16 @@ def check_kumo_nasdaq_1h() -> Optional[dict]:
     if df is None or len(df) < 60:
         return None
 
-    t_sen, k_sen, s_a, s_b, chikou = ichimoku(df)
+    t_sen, k_sen, s_a, s_b, _ = ichimoku(df)
     df["t_sen"] = t_sen
     df["k_sen"] = k_sen
     df["s_a"] = s_a
     df["s_b"] = s_b
-    df["chikou"] = chikou
+    # Chikou (regola standard): chiusura attuale contro quella di 26 candele prima.
+    # NON usare il chikou "spostato nel futuro" (Close.shift(-26)): per le candele
+    # recenti è vuoto, dropna() le scarta e il bot valuterebbe una candela di 27
+    # periodi fa (errore corretto il 27/11/2026).
+    df["c_26"] = df["Close"].shift(26)
     df["rsi14"] = rsi(df["Close"], 14)
     df["atr14"] = atr(df, 14)
     df.dropna(inplace=True)
@@ -549,11 +562,10 @@ def check_kumo_nasdaq_1h() -> Optional[dict]:
     cross_dn = prev["t_sen"] >= prev["k_sen"] and curr["t_sen"] < curr["k_sen"]
     entry = curr["Close"]
     a = curr["atr14"]
-    chikou_ref = df["Close"].iloc[-28] if len(df) > 28 else df["Close"].iloc[0]
 
     if (cross_up and entry > kumo_top and
             40 < curr["rsi14"] < 65 and
-            curr["chikou"] > chikou_ref and
+            entry > curr["c_26"] and
             curr["t_sen"] > curr["s_a"] and curr["t_sen"] > curr["s_b"]):
         sl = curr["k_sen"] - 0.3 * a
         risk = entry - sl
@@ -574,7 +586,7 @@ def check_kumo_nasdaq_1h() -> Optional[dict]:
 
     if (cross_dn and entry < kumo_bot and
             35 < curr["rsi14"] < 60 and
-            curr["chikou"] < chikou_ref and
+            entry < curr["c_26"] and
             curr["t_sen"] < curr["s_a"] and curr["t_sen"] < curr["s_b"]):
         sl = curr["k_sen"] + 0.3 * a
         risk = sl - entry
@@ -606,9 +618,10 @@ def check_kumo_nasdaq_1h() -> Optional[dict]:
 #  - dati freschi: candela di oggi e chiusa da meno di 25 minuti
 #
 # ⚠️ Parametri NON validati.
-#   ANT: quotata dal 19/11/2026, nessuno storico → niente backtest possibile.
+#   ANT: quotata dal 19/11/2026, storico di poche sedute → backtest non significativo.
 #   CAT, AVGO: puoi provare `python3 backtest.py azioni` (circa 60 giorni di dati).
-# ⚠️ Evita i giorni dei risultati trimestrali (gap e volatilità anomali).
+# Giorni dei risultati trimestrali: bloccati in automatico SE la data è in
+#   UTILI di news_filter.py (gap e volatilità anomali). Aggiorna il calendario.
 # Short: ANT disattivato per default (CAT/AVGO attivi). Variabili Railway:
 #   ANT_ABILITA_SHORT, CAT_ABILITA_SHORT, AVGO_ABILITA_SHORT  = "1" oppure "0"
 # ══════════════════════════════════════════════════════════════════════════════
@@ -736,13 +749,13 @@ def check_orb_ant() -> Optional[dict]:
 def check_orb_cat() -> Optional[dict]:
     return _check_orb_azione(
         TICKER_CAT, "ORB CATERPILLAR (CAT)", "Caterpillar (CAT)", CAT_ABILITA_SHORT, 0.03,
-        "⚠️ Evita i giorni dei risultati trimestrali | strategia non validata")
+        "⚠️ Strategia non validata | giorni degli utili bloccati solo se in calendario")
 
 
 def check_orb_avgo() -> Optional[dict]:
     return _check_orb_azione(
         TICKER_AVGO, "ORB BROADCOM (AVGO)", "Broadcom (AVGO)", AVGO_ABILITA_SHORT, 0.04,
-        "⚠️ Evita i giorni dei risultati trimestrali | strategia non validata")
+        "⚠️ Strategia non validata | giorni degli utili bloccati solo se in calendario")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
