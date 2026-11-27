@@ -1,12 +1,13 @@
 """
 VERIFICA BOT ↔ BACKTEST — python3 verifica_backtest.py
 
-Per le strategie 1, 2, 4, 5 (VWAP Reversal, London Sweep, Kumo Oro 4H, Kumo Nasdaq 1H)
+Per le strategie 1, 2, 3, 4, 5 e 9 (VWAP Reversal, London Sweep, ORB S&P500, Kumo Oro 4H,
+Kumo Nasdaq 1H, Ritracciamento S&P500)
 riesegue le funzioni VERE del bot (strategies.py) su ogni controllo storico:
  - agli stessi orari dello scheduler di main.py;
  - con i dati che Yahoo avrebbe restituito in quel momento (candela in formazione inclusa);
  - con la stessa pausa tra segnali di main.should_send.
-Poi confronta i segnali con quelli di `backtest.py bot`. Se coincidono, il backtest
+Poi confronta i segnali con quelli di `backtest.py bot`, `orb` e `trend`. Se coincidono, il backtest
 misura esattamente ciò che fa il bot. Richiede rete verso Yahoo Finance (~2 minuti).
 Filtro notizie non applicato (né qui né nel backtest).
 """
@@ -94,9 +95,11 @@ def backtest_segnali(fn, ticker, period, interval):
             for r in sdf.itertuples()]
 
 
-def confronta(nome, live, back):
-    L = {(ts, d): e for ts, d, e, _ in live}
-    B = {(ts, d): e for ts, d, e in back}
+def confronta(nome, live, back, dal=None):
+    """dal: ignora i segnali precedenti (inizio dati: il bot vuole almeno 40 candele di storia,
+    che dal vivo ha sempre, mentre all'inizio dello storico scaricato non ci sono)."""
+    L = {(ts, d): e for ts, d, e, _ in live if dal is None or ts >= dal}
+    B = {(ts, d): e for ts, d, e in back if dal is None or ts >= dal}
     comuni = set(L) & set(B)
     diff_prezzo = [k for k in comuni if abs(L[k] - B[k]) > 0.01 * max(1, abs(B[k])) / 100]
     print(f"\n== {nome}: bot {len(L)} segnali | backtest {len(B)} | in comune {len(comuni)}"
@@ -143,4 +146,57 @@ n1h = dati("^NDX", "2y", "1h")
 live = replay("kumo_ndx", st.check_kumo_nasdaq_1h, n1h, orari_ogni(n1h, 60, 32), 8,
               finestra_job=lambda n: time(9, 30) <= n.astimezone(ET).time() <= time(15, 35))
 confronta("KUMO RIDER NASDAQ 1H", live, backtest_segnali(bt.backtest_kumo_nasdaq_1h, "^NDX", "2y", "1h"))
+print(f"   ({T.time()-t0:.0f}s)")
+
+# 5) ORB S&P500: ai :02, :17, :32, :47 tra 09:45 e 15:45 di New York, dati "5d"
+s15 = dati("^GSPC", "60d", "15m")
+live = replay("orb_sp500", st.check_orb_sp500, s15, orari_ogni(s15, 15, 2), 8,
+              finestra_job=lambda n: time(9, 45) <= n.astimezone(ET).time() <= time(15, 45),
+              max_righe=140)
+confronta("ORB S&P500", live, backtest_segnali(bt.backtest_orb_sp500, "^GSPC", "60d", "15m"),
+          dal=s15.index[60])          # dal 3° giorno di dati
+print(f"   ({T.time()-t0:.0f}s)")
+
+# 6) Ritracciamento S&P500: ogni sera alle 16:10 di New York con dati giornalieri "2y".
+#    Confronto ingressi ed eventi di uscita con backtest._trades_pullback (uscita all'apertura dopo).
+import news_filter as nf
+g1d = scarica("^GSPC", "6y", "1d")
+giorni_borsa = [ts.date() for ts in g1d.index]
+# Giorno d'ingresso = giorno di borsa successivo nei dati (isola la logica dal calendario festività)
+nf.prossimo_giorno_usa = lambda d: next((x for x in giorni_borsa if x > d), d + timedelta(days=1))
+inizio = len(g1d) - 1000                                   # ~4 anni di sere
+pos, eventi_bot = None, []
+for k in range(inizio, len(g1d)):
+    giorno = g1d.index[k].date()
+    Orologio.now_val = ET.localize(datetime.combine(giorno, time(16, 10))).astimezone(ROME)
+    fetta = g1d.iloc[max(0, k + 1 - 504):k + 1]            # "2y" ≈ 504 sedute
+    st.get_data = lambda *a, **k: fetta.copy()
+    msg, pos, _ = st.analizza_pullback("^GSPC", "pullback_sp500", "S&P 500", pos)
+    if msg and msg["tipo"] in ("ENTRATA", "USCITA", "TEMPO", "STOP"):
+        eventi_bot.append((msg["tipo"], msg["data"]))
+
+raw = g1d.copy(); raw.index = raw.index.tz_localize(None)
+trades = bt._trades_pullback(raw, uscita_apertura_dopo=True)[0]
+primo = g1d.index[inizio].date()
+eventi_bt = []
+for t in trades:
+    sd = t["signal_date"].date()
+    if sd < primo:
+        continue
+    eventi_bt.append(("ENTRATA", sd))
+    if t["motivo"] == "fine dati":
+        continue
+    tipo = {"uscita": "USCITA", "tempo": "TEMPO", "stop": "STOP"}[t["motivo"]]
+    # con l'uscita all'apertura dopo, l'evento (segnale di uscita) è la sera prima
+    giorno_ev = t["exit_date"].date()
+    if tipo in ("USCITA", "TEMPO"):
+        giorno_ev = max(d for d in giorni_borsa if d < giorno_ev)
+    eventi_bt.append((tipo, giorno_ev))
+LB, BB = set(eventi_bot), set(eventi_bt)
+print(f"\n== RITRACCIAMENTO S&P500 (dal {primo:%d/%m/%Y}): eventi bot {len(LB)} | backtest {len(BB)}"
+      f" | in comune {len(LB & BB)}")
+for e in sorted(LB - BB, key=lambda x: x[1]):
+    print(f"   solo BOT      {e[1]:%d/%m/%Y} {e[0]}")
+for e in sorted(BB - LB, key=lambda x: x[1]):
+    print(f"   solo BACKTEST {e[1]:%d/%m/%Y} {e[0]}")
 print(f"   ({T.time()-t0:.0f}s)")

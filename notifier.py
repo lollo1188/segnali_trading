@@ -233,7 +233,7 @@ def send_startup_message(spente=None, nota_stato=""):
         f"<b>Strategie attive:</b>\n"
         f"1️⃣ VWAP Reversal Oro 15min (backtest: non dimostrata)\n"
         f"2️⃣ London Sweep Oro 08-10 (backtest: in perdita)\n"
-        f"3️⃣ ORB S&amp;P500 15min (backtest: nessun vantaggio)\n"
+        f"3️⃣ ORB S&amp;P500 15min (backtest: positivo ma su 60 giorni)\n"
         f"4️⃣ Kumo Rider Oro 4H swing (backtest: in perdita)\n"
         f"5️⃣ Kumo Rider Nasdaq 1H swing (backtest: in perdita)\n"
         f"6️⃣ ORB Anthropic ANT 15min (sperimentale, senza backtest)\n"

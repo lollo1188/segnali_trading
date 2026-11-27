@@ -2,7 +2,7 @@
 STRATEGIE DI TRADING
 1. VWAP Reversal Oro 15min — intraday (backtest 60 giorni: PF 1,71 su 10 trade, campione troppo piccolo)
 2. London Liquidity Sweep Oro — intraday (backtest 60 giorni: PF 0,69 su 8 trade)
-3. ORB S&P500 15min — intraday (backtest 60 giorni: PF ≈1,00, nessun vantaggio)
+3. ORB S&P500 15min — intraday (backtest 60 giorni: PF 1,40 su 59 trade, campione piccolo)
 4. Kumo Rider Oro 4H — swing overnight OK (backtest 2 anni: PF 0,83 su 10 trade)
 5. Kumo Rider Nasdaq 1H — swing overnight OK (backtest 2 anni: 5 trade, tutti in perdita)
 6. ORB Anthropic ANT 15min — intraday (SPERIMENTALE: storico troppo breve per un backtest)
@@ -358,7 +358,7 @@ def check_london_sweep_gold() -> Optional[dict]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STRATEGIA 3 — ORB S&P500 15min (backtest 60 giorni: PF ≈1,00, 48 trade)
+# STRATEGIA 3 — ORB S&P500 15min (backtest 60 giorni: PF 1,40 su 59 trade, non dimostrata)
 # Intraday — OR = prima candela 09:30 ET (15:30 italiane), ingressi 09:45-15:45 ET
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -851,8 +851,13 @@ def analizza_pullback(ticker: str, chiave: str, nome: str, posizione: Optional[d
         if last_date < ed:                       # ingresso ancora da fare (domani)
             return None, posizione, last_date
         barre = df[[d.date() >= ed for d in df.index]]
-        if len(barre) == 0 or barre.index[0].date() != ed:
-            return None, None, last_date         # dati incoerenti: azzera
+        if len(barre) == 0:
+            return None, posizione, last_date    # ingresso non ancora avvenuto
+        if barre.index[0].date() != ed:
+            # Il giorno d'ingresso previsto non c'è nei dati (borsa chiusa per una festività
+            # non presente nel calendario): l'ingresso è il primo giorno di borsa successivo.
+            # Prima la posizione teorica veniva scartata e i promemoria si fermavano.
+            posizione = dict(posizione, entry_date=barre.index[0].date())
         entry = float(barre.iloc[0]["Open"])
         stop = entry - PB_ATR_STOP * posizione["atr"]
         for k in range(len(barre)):
