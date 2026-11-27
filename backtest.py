@@ -1161,7 +1161,7 @@ def backtest_vwap_reversal_oro():
     for i in range(1, len(df) - 1):
         curr, prev = df.iloc[i], df.iloc[i - 1]
         ts = df.index[i]
-        if not (time(8, 0) <= ts.time() <= time(21, 45)):
+        if not (time(8, 0) <= ts.time() <= time(21, 15)):    # come il bot
             continue
         entry, a = curr["Close"], curr["atr14"]
         sig = None
@@ -1180,7 +1180,7 @@ def backtest_vwap_reversal_oro():
             continue
         ultimi[sig[0]] = ts
         signals.append({"entry": entry, "sl": sig[1], "tp": sig[2], "direction": sig[0],
-                        "next_close": uscita})
+                        "next_close": uscita, "ts": ts})
     if not signals:
         print("  Nessun segnale")
         return None
@@ -1204,9 +1204,11 @@ def backtest_london_sweep_oro():
         if len(asia) < 3:
             continue
         asia_low, asia_high = asia["Low"].min(), asia["High"].max()
-        # Il bot valuta le candele chiuse con inizio 08:15–09:45 (la 08:00 non è mai "curr")
+        # Il bot valuta le candele chiuse con inizio 08:15–09:30: controlla ogni 15 minuti
+        # tra 08:00 e 10:00, la 08:00 non è mai l'ultima chiusa con 3 candele in finestra,
+        # e la 09:45 si chiude dopo le 10:00, quando il controllo è già fuori finestra.
         for ts in oggi.index:
-            if not (time(8, 15) <= ts.time() <= time(9, 45)):
+            if not (time(8, 15) <= ts.time() <= time(9, 30)):
                 continue
             i = df.index.get_loc(ts)
             if i < 4:
@@ -1226,7 +1228,7 @@ def backtest_london_sweep_oro():
             if uscita is None:
                 continue
             signals.append({"entry": entry, "sl": sl, "tp": tp, "direction": 1,
-                            "next_close": uscita})
+                            "next_close": uscita, "ts": ts})
             break      # pausa 12h: al massimo un segnale al giorno
     if not signals:
         print("  Nessun segnale")
@@ -1276,7 +1278,7 @@ def _segnali_kumo(df, filtro_orario=None, pausa_ore=12, max_candele=60):
             continue
         ultimi[sig[0]] = ts
         signals.append({"entry": entry, "sl": sig[1], "tp": sig[2], "direction": sig[0],
-                        "next_close": uscita})
+                        "next_close": uscita, "ts": ts})
     return signals
 
 
@@ -1301,9 +1303,12 @@ def backtest_kumo_nasdaq_1h():
         return None
     df = _indice_roma(df)
 
-    def orario(ts):                      # candele con inizio 09:30–15:00 di New York
+    def orario(ts):
+        # Il bot controlla alle :05 di ogni ora tra 09:30 e 15:00 di New York: l'ultima
+        # candela chiusa valutata è quella delle 12:30 (la 13:30 si chiude alle 14:30 ma
+        # viene letta solo alle 15:05, fuori finestra).
         t = ts.tz_convert(ET_TZ).time()
-        return time(9, 30) <= t <= time(15, 0)
+        return time(9, 30) <= t <= time(12, 30)
     # uscita forzata dopo 70 candele 1H (~10 sedute)
     signals = _segnali_kumo(df, filtro_orario=orario, pausa_ore=8, max_candele=70)
     if not signals:

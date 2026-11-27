@@ -59,11 +59,11 @@ Le strategie USA (ORB, Kumo Nasdaq, ritracciamento) seguono l'**ora di New York*
 
 | Strategia | Orari possibili | Note |
 |-----------|-----------------|------|
-| VWAP Reversal Oro | ~08:15–22:00 | Controllo ogni 15 min |
+| VWAP Reversal Oro | ~08:15–21:45 | Controllo ogni 15 min; ultima candela 21:15 |
 | London Sweep Oro | ~08:30–10:00 | Solo long |
 | ORB S&P500 | ~16:00–21:45 | Al massimo uno al giorno per direzione |
 | ORB ANT / CAT / AVGO | ~16:00–20:30 | Come sopra |
-| Kumo Rider Oro 4H | 00:20, 04:20, 08:20, 12:20, 16:20, 20:20 | Raro: serve un incrocio Ichimoku |
+| Kumo Rider Oro 4H | ~20 minuti dopo la chiusura di una candela 4H (controllo ogni ora) | Raro: serve un incrocio Ichimoku |
 | Kumo Rider Nasdaq 1H | ~17:05, 18:05, 19:05, 20:05 | Raro |
 | Ritracciamento S&P500 / AVGO | ~22:10 e 22:40, lun–ven | Pochi segnali all'anno; promemoria serali finché la posizione teorica è aperta |
 
@@ -202,6 +202,7 @@ python3 backtest.py azioni # ORB su CAT e AVGO (60 giorni, un trade al giorno)
 python3 backtest.py trend  # ritracciamento nel trend, S&P500 giornaliero (dal 1993)
 python3 backtest.py trend_azioni  # stessa idea su CAT e AVGO (giornaliero)
 python3 backtest.py bot    # strategie 1, 2, 4, 5 del bot: VWAP Reversal, London Sweep, Kumo Oro 4H e Nasdaq 1H
+python3 verifica_backtest.py  # controlla che bot e backtest diano gli stessi segnali (strategie 1, 2, 4, 5)
 COSTI_X=2 python3 backtest.py orb # stress test: spread moltiplicati per 2
 ```
 
@@ -209,9 +210,10 @@ Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine s
 
 **Limiti da tenere presenti:**
 - Per i dati a 15 minuti Yahoo Finance fornisce solo circa 60 giorni: l'ORB viene testato su poche decine di trade, troppo poche per un PF affidabile.
-- Backtest `bot` (eseguito il 27/11/2026, costi Revolut attuali): **VWAP Reversal Oro** PF 1,71 su 10 trade (60 giorni); **London Sweep Oro** PF 0,69 su 8 trade (60 giorni); **Kumo Rider Oro 4H** PF 0,83 su 10 trade (2 anni); **Kumo Rider Nasdaq 1H** PF 0,00 su 5 trade (2 anni, tutti in perdita). Campioni minuscoli: **nessuna delle quattro dimostra un vantaggio**, e tre su quattro sono sotto 1. I PF scritti in passato (1.84, 1.55, 1.62, 1.51) non sono confermati.
+- Backtest `bot` (eseguito il 27/11/2026, costi Revolut attuali): **VWAP Reversal Oro** PF 1,71 su 10 trade (60 giorni); **London Sweep Oro** PF 0,69 su 8 trade (60 giorni); **Kumo Rider Oro 4H** PF 0,83 su 10 trade (2 anni); **Kumo Rider Nasdaq 1H** PF 0,00 su 4 trade (2 anni, tutti in perdita). Con costi raddoppiati (`COSTI_X=2`) i risultati cambiano poco. Campioni minuscoli: **nessuna delle quattro dimostra un vantaggio**, e tre su quattro sono sotto 1. I PF scritti in passato (1.84, 1.55, 1.62, 1.51) non sono confermati.
   - Semplificazioni: London Sweep senza TP1 al 50% e trailing; Kumo senza commissione notturna e con uscita forzata dopo circa 10 giorni; se nella stessa candela si toccano stop e target conta lo stop.
-  - Il backtest Kumo usa la regola chikou standard (chiusura attuale contro quella di 26 candele prima) sull'ultima candela chiusa.
+  - Il backtest Kumo usa la regola chikou standard (chiusura attuale contro quella di 26 candele prima) sull'ultima candela chiusa, come il bot dopo la correzione del 27/11/2026.
+  - **Bot e backtest coincidono**: `python3 verifica_backtest.py` riesegue le funzioni del bot su ogni controllo storico (stessi orari dello scheduler, stessi dati che Yahoo dava in quel momento, stesse pause tra segnali) e le confronta con il backtest. Al 27/11/2026: stessi segnali e stessi prezzi per tutte e quattro le strategie. Il Kumo Oro arriva 20 minuti dopo la chiusura della candela.
 - Il backtest simula un solo trade al giorno e non gestisce il TP1 con break-even.
 - Nelle varianti ORB S&P500 il filtro sull'ampiezza dell'opening range usa l'ATR dell'intera giornata, quindi anche candele future (lookahead). Il backtest `azioni` non ha questo difetto.
 - Nessun backtest include il filtro notizie.

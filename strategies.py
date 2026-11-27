@@ -4,7 +4,7 @@ STRATEGIE DI TRADING
 2. London Liquidity Sweep Oro — intraday (backtest 60 giorni: PF 0,69 su 8 trade)
 3. ORB S&P500 15min — intraday (backtest 60 giorni: PF ≈1,00, nessun vantaggio)
 4. Kumo Rider Oro 4H — swing overnight OK (backtest 2 anni: PF 0,83 su 10 trade)
-5. Kumo Rider Nasdaq 1H — swing overnight OK (backtest 2 anni: 5 trade, tutti in perdita)
+5. Kumo Rider Nasdaq 1H — swing overnight OK (backtest 2 anni: 4 trade, tutti in perdita)
 6. ORB Anthropic ANT 15min — intraday (SPERIMENTALE: storico troppo breve per un backtest)
 7. ORB Caterpillar CAT 15min — intraday (non validata: usa backtest.py azioni)
 8. ORB Broadcom AVGO 15min — intraday (non validata: usa backtest.py azioni)
@@ -14,6 +14,7 @@ STRATEGIE DI TRADING
 I PF scritti in passato per le strategie 1-5 (1.84, 1.55, 1.40, 1.62, 1.51) non
 erano confermati da nessuno script del repository e sono stati tolti. Risultati
 attuali: `python3 backtest.py bot` (1, 2, 4, 5) e `python3 backtest.py orb` (3).
+`python3 verifica_backtest.py` controlla che il bot e il backtest diano gli stessi segnali.
 
 Orari: le strategie USA (ORB, Kumo Nasdaq, ritracciamento) usano l'ORA DI NEW YORK,
 così restano agganciate all'apertura di Wall Street anche nelle settimane in cui
@@ -154,7 +155,7 @@ def ichimoku(df: pd.DataFrame, tenkan=9, kijun=26, senkou_b=52, disp=26):
     k_sen = (h.rolling(kijun).max() + l.rolling(kijun).min()) / 2
     s_a = ((t_sen + k_sen) / 2).shift(disp)
     s_b = ((h.rolling(senkou_b).max() + l.rolling(senkou_b).min()) / 2).shift(disp)
-    chikou = df["Close"].shift(-disp)
+    chikou = df["Close"].shift(-disp)   # ⚠️ guarda nel futuro: non usarlo per i segnali
     return t_sen, k_sen, s_a, s_b, chikou
 
 
@@ -198,9 +199,11 @@ def check_vwap_reversal_gold() -> Optional[dict]:
     if len(df) < 3:
         return None
 
-    # Usa [-2] = ultima candela CHIUSA, [-1] è ancora in formazione
+    # Usa [-2] = ultima candela CHIUSA, [-1] è ancora in formazione.
+    # Ultima candela valutata: 21:15 (si chiude alle 21:30), così il segnale arriva
+    # prima delle 21:45, l'ora di chiusura delle intraday.
     last_cet = df.index[-2].tz_convert(ROME_TZ)
-    if not (time(8, 0) <= last_cet.time() <= time(21, 45)):
+    if not (time(8, 0) <= last_cet.time() <= time(21, 15)):
         return None
 
     curr = df.iloc[-2]
@@ -445,12 +448,16 @@ def check_kumo_gold_4h() -> Optional[dict]:
     if len(df) < 60:
         return None
 
-    t_sen, k_sen, s_a, s_b, chikou = ichimoku(df)
+    t_sen, k_sen, s_a, s_b, _ = ichimoku(df)
     df["t_sen"] = t_sen
     df["k_sen"] = k_sen
     df["s_a"] = s_a
     df["s_b"] = s_b
-    df["chikou"] = chikou
+    # Chikou (regola standard): chiusura attuale contro quella di 26 candele prima.
+    # NON usare il chikou "spostato nel futuro" (Close.shift(-26)): per le candele
+    # recenti è vuoto, dropna() le scarta e il bot valuterebbe una candela di 27
+    # periodi fa (errore corretto il 27/11/2026).
+    df["c_26"] = df["Close"].shift(26)
     df["rsi14"] = rsi(df["Close"], 14)
     df["atr14"] = atr(df, 14)
     df.dropna(inplace=True)
@@ -467,11 +474,10 @@ def check_kumo_gold_4h() -> Optional[dict]:
     cross_dn = prev["t_sen"] >= prev["k_sen"] and curr["t_sen"] < curr["k_sen"]
     entry = curr["Close"]
     a = curr["atr14"]
-    chikou_ref = df["Close"].iloc[-28] if len(df) > 28 else df["Close"].iloc[0]
 
     if (cross_up and entry > kumo_top and
             40 < curr["rsi14"] < 65 and
-            curr["chikou"] > chikou_ref and
+            entry > curr["c_26"] and
             curr["t_sen"] > curr["s_a"] and curr["t_sen"] > curr["s_b"]):
         sl = curr["k_sen"] - 0.3 * a
         risk = entry - sl
@@ -493,7 +499,7 @@ def check_kumo_gold_4h() -> Optional[dict]:
 
     if (cross_dn and entry < kumo_bot and
             35 < curr["rsi14"] < 60 and
-            curr["chikou"] < chikou_ref and
+            entry < curr["c_26"] and
             curr["t_sen"] < curr["s_a"] and curr["t_sen"] < curr["s_b"]):
         sl = curr["k_sen"] + 0.3 * a
         risk = sl - entry
@@ -517,7 +523,7 @@ def check_kumo_gold_4h() -> Optional[dict]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STRATEGIA 5 — KUMO RIDER NASDAQ 1H (backtest: 5 trade, tutti in perdita)
+# STRATEGIA 5 — KUMO RIDER NASDAQ 1H (backtest: 4 trade, tutti in perdita)
 # Swing — overnight OK se segnale forte
 # Ichimoku 9/26/52 + RSI 40-65 + filtro orario 09:30-15:00 ET (15:30-21:00 italiane)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -527,12 +533,16 @@ def check_kumo_nasdaq_1h() -> Optional[dict]:
     if df is None or len(df) < 60:
         return None
 
-    t_sen, k_sen, s_a, s_b, chikou = ichimoku(df)
+    t_sen, k_sen, s_a, s_b, _ = ichimoku(df)
     df["t_sen"] = t_sen
     df["k_sen"] = k_sen
     df["s_a"] = s_a
     df["s_b"] = s_b
-    df["chikou"] = chikou
+    # Chikou (regola standard): chiusura attuale contro quella di 26 candele prima.
+    # NON usare il chikou "spostato nel futuro" (Close.shift(-26)): per le candele
+    # recenti è vuoto, dropna() le scarta e il bot valuterebbe una candela di 27
+    # periodi fa (errore corretto il 27/11/2026).
+    df["c_26"] = df["Close"].shift(26)
     df["rsi14"] = rsi(df["Close"], 14)
     df["atr14"] = atr(df, 14)
     df.dropna(inplace=True)
@@ -552,11 +562,10 @@ def check_kumo_nasdaq_1h() -> Optional[dict]:
     cross_dn = prev["t_sen"] >= prev["k_sen"] and curr["t_sen"] < curr["k_sen"]
     entry = curr["Close"]
     a = curr["atr14"]
-    chikou_ref = df["Close"].iloc[-28] if len(df) > 28 else df["Close"].iloc[0]
 
     if (cross_up and entry > kumo_top and
             40 < curr["rsi14"] < 65 and
-            curr["chikou"] > chikou_ref and
+            entry > curr["c_26"] and
             curr["t_sen"] > curr["s_a"] and curr["t_sen"] > curr["s_b"]):
         sl = curr["k_sen"] - 0.3 * a
         risk = entry - sl
@@ -577,7 +586,7 @@ def check_kumo_nasdaq_1h() -> Optional[dict]:
 
     if (cross_dn and entry < kumo_bot and
             35 < curr["rsi14"] < 60 and
-            curr["chikou"] < chikou_ref and
+            entry < curr["c_26"] and
             curr["t_sen"] < curr["s_a"] and curr["t_sen"] < curr["s_b"]):
         sl = curr["k_sen"] + 0.3 * a
         risk = sl - entry

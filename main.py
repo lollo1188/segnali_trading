@@ -297,7 +297,10 @@ try:
     _aggiungi_job(job_orb_ant, "orb_ant", "interval", minutes=15)
     _aggiungi_job(job_orb_cat, "orb_cat", "interval", minutes=15)
     _aggiungi_job(job_orb_avgo, "orb_avgo", "interval", minutes=15)
-    _aggiungi_job(job_kumo_gold_4h, "kumo_gold_4h", "cron", hour="0,4,8,12,16,20", minute=20)
+    # Ogni ora ai :20: le candele 4H sono allineate in UTC, quindi in ora italiana si
+    # chiudono a orari diversi tra ora solare e legale. Controllando ogni ora il segnale
+    # arriva sempre ~20 minuti dopo la chiusura (la pausa di 12h evita doppioni).
+    _aggiungi_job(job_kumo_gold_4h, "kumo_gold_4h", "cron", minute=20)
     _aggiungi_job(job_kumo_nasdaq, "kumo_nasdaq", "cron", minute=5)
     # Ritracciamento giornaliero: dopo la chiusura USA, in ora di New York (16:10 e 16:40 ET,
     # di solito 22:10 e 22:40 italiane). Due controlli: se Yahoo è in ritardo il secondo recupera.
