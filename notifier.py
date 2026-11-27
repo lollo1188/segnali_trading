@@ -1,11 +1,12 @@
 """NOTIFIER — Invio messaggi Telegram"""
 
 import os, logging, requests
-from datetime import datetime
+from datetime import datetime, time
 import pytz
 
 logger       = logging.getLogger(__name__)
 ROME_TZ      = pytz.timezone("Europe/Rome")
+ET_TZ        = pytz.timezone("America/New_York")
 TOKEN        = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID      = os.environ.get("CHAT_ID", "")
 API          = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -89,10 +90,39 @@ def _blocco_slittamento(signal: dict) -> str:
     )
 
 
+def _blocco_distanze(signal: dict) -> str:
+    """Stop e target come DISTANZA dall'entry. Servono quando il prezzo del bot non
+    coincide con quello di Revolut (es. oro: il bot legge il future, Revolut lo spot)."""
+    try:
+        entry = float(signal["entry"])
+        sl    = float(signal["sl"])
+        tp    = float(signal["tp"])
+    except (KeyError, TypeError, ValueError):
+        return ""
+    is_long = signal.get("direzione") == "LONG"
+    segno = 1 if is_long else -1
+    parti = [f"stop <code>{sl - entry:+.2f}</code>"]
+    try:
+        if signal.get("tp1"):
+            parti.append(f"TP1 <code>{float(signal['tp1']) - entry:+.2f}</code>")
+    except ValueError:
+        pass
+    parti.append(f"target <code>{tp - entry:+.2f}</code>")
+    riga = f"📏 <b>Distanze dall'entry:</b> {' | '.join(parti)}\n"
+    if signal.get("prezzi_future"):
+        riga += (
+            "⚠️ <b>Prezzi del future COMEX</b>, non dello spot di Revolut: possono differire "
+            "di decine di $. <b>Su Revolut usa le distanze</b> dal tuo prezzo d'ingresso "
+            f"(es. stop = ingresso {'−' if is_long else '+'} {abs(sl - entry):.2f}).\n"
+        )
+    return riga
+
+
 def send_telegram(signal: dict) -> bool:
     now  = datetime.now(ROME_TZ).strftime("%d/%m %H:%M")
     tipo = "🟢 LONG" if signal.get("direzione") == "LONG" else "🔴 SHORT"
-    overnight = "⏰ <b>SWING — può restare overnight</b>" if "4H" in signal.get("timeframe","") or "1H" in signal.get("timeframe","") else "⏱ <b>INTRADAY — chiudi entro 21:45 CET</b>"
+    chiudi = signal.get("chiudi_entro", "21:45")
+    overnight = "⏰ <b>SWING — può restare overnight</b>" if "4H" in signal.get("timeframe","") or "1H" in signal.get("timeframe","") else f"⏱ <b>INTRADAY — chiudi entro le {chiudi} (ora italiana)</b>"
 
     # Orario della candela su cui si basa il segnale (es. "16:15–16:30 CET").
     # Se la strategia non lo fornisce, la riga viene omessa.
@@ -109,6 +139,7 @@ def send_telegram(signal: dict) -> bool:
         f"🛑 <b>Stop:</b>  <code>{signal['sl']}</code>\n"
         f"✅ <b>Target:</b> <code>{signal['tp']}</code>\n"
         f"📐 <b>R:R:</b> {signal['rr']}\n"
+        f"{_blocco_distanze(signal)}"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"{_blocco_slittamento(signal)}"
         f"📝 {signal.get('note','')}\n\n"
@@ -120,6 +151,11 @@ def send_telegram(signal: dict) -> bool:
 
 def _fmt_d(d):
     return d.strftime("%d/%m")
+
+
+def _apertura_usa_it(d) -> str:
+    """Ora italiana dell'apertura di Wall Street (09:30 ET) nel giorno d."""
+    return ET_TZ.localize(datetime.combine(d, time(9, 30))).astimezone(ROME_TZ).strftime("%H:%M")
 
 
 def send_pullback(m: dict) -> bool:
@@ -135,7 +171,7 @@ def send_pullback(m: dict) -> bool:
             f"Segnale a fine seduta del {_fmt_d(m['data'])}\n"
             f"RSI(2) <b>{m['rsi2']:.1f}</b> (soglia 10) | chiusura <code>{m['close']:.2f}</code> "
             f"sopra la media a 200 giorni (<code>{m['sma200']:.2f}</code>)\n\n"
-            f"➡️ <b>ENTRA LONG all'apertura USA del {_fmt_d(m['ingresso'])}</b> (15:30 italiane)\n"
+            f"➡️ <b>ENTRA LONG all'apertura USA del {_fmt_d(m['ingresso'])}</b> ({_apertura_usa_it(m['ingresso'])} italiane)\n"
             f"🛑 Stop: prezzo d'ingresso − <code>{m['stop_dist']:.2f}</code> (3×ATR). "
             f"Con ingresso a {m['close']:.2f} sarebbe ≈ <code>{m['close'] - m['stop_dist']:.2f}</code>\n"
             f"🎯 Uscita: quando la chiusura supera la media a 5 giorni (ora <code>{m['sma5']:.2f}</code>), "
@@ -144,7 +180,7 @@ def send_pullback(m: dict) -> bool:
             f"{riga_ev}"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"ℹ️ Strategia giornaliera, SOLO LONG, in prova (demo 4–8 settimane).\n"
-            f"ℹ️ Il bot non conosce le tue posizioni: seguirà una posizione teorica e ti avviserà ogni sera.\n"
+            f"ℹ️ Il bot non conosce le tue posizioni: seguirà una posizione teorica (salvata anche dopo i riavvii) e ti avviserà ogni sera.\n"
             f"🕐 Inviato {datetime.now(ROME_TZ).strftime('%d/%m %H:%M')}"
         )
     elif tipo == "MANTIENI":
@@ -184,9 +220,10 @@ def send_pullback(m: dict) -> bool:
     return _send(msg)
 
 
-def send_startup_message(spente=None):
+def send_startup_message(spente=None, nota_stato=""):
     now = datetime.now(ROME_TZ).strftime("%d/%m/%Y %H:%M")
     riga_spente = f"⏸ <b>Spente:</b> {', '.join(spente)}\n" if spente else ""
+    riga_stato = f"{nota_stato}\n" if nota_stato else ""
     msg = (
         f"🤖 <b>Trading Bot — Avviato</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
@@ -202,6 +239,7 @@ def send_startup_message(spente=None):
         f"9️⃣ Ritracciamento S&amp;P500 giornaliero (solo long, demo)\n"
         f"🔟 Ritracciamento Broadcom AVGO giornaliero (solo long, demo)\n"
         f"{riga_spente}"
+        f"{riga_stato}"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"⚠️ Max 1.5% per trade | Max 4% totale\n"
         f"📅 Controlla ForexFactory ogni mattina\n"

@@ -1,5 +1,5 @@
 """
-STRATEGIE DI TRADING — 5 strategie profittevoli
+STRATEGIE DI TRADING
 1. VWAP Reversal Oro 15min (PF 1.84) — intraday
 2. London Liquidity Sweep Oro (PF 1.55) — intraday
 3. ORB S&P500 15min (PF 1.40) — intraday
@@ -8,6 +8,12 @@ STRATEGIE DI TRADING — 5 strategie profittevoli
 6. ORB Anthropic ANT 15min — intraday (SPERIMENTALE: nessun backtest possibile)
 7. ORB Caterpillar CAT 15min — intraday (non validata: usa backtest.py azioni)
 8. ORB Broadcom AVGO 15min — intraday (non validata: usa backtest.py azioni)
+9-10. Ritracciamento nel trend giornaliero S&P 500 e AVGO — solo long
+
+Orari: le strategie USA (ORB, Kumo Nasdaq, ritracciamento) usano l'ORA DI NEW YORK,
+così restano agganciate all'apertura di Wall Street anche nelle settimane in cui
+l'ora legale USA ed europea non coincidono (marzo e fine ottobre/inizio novembre).
+Le strategie sull'oro restano in ora italiana (sessione europea).
 """
 import logging
 import os
@@ -25,12 +31,44 @@ logger = logging.getLogger(__name__)
 ROME_TZ = pytz.timezone("Europe/Rome")
 ET_TZ = pytz.timezone("America/New_York")
 
-TICKER_GOLD = "GC=F"
+TICKER_GOLD = "GC=F"   # future COMEX: su Revolut l'oro è SPOT, i prezzi differiscono (vedi notifier)
 TICKER_SP500 = "^GSPC"
 TICKER_NASDAQ = "^NDX"
 TICKER_ANT = os.environ.get("TICKER_ANT", "ANT")     # Anthropic, Nasdaq (da giovedì 19/11/2026)
 TICKER_CAT = os.environ.get("TICKER_CAT", "CAT")     # Caterpillar, NYSE
 TICKER_AVGO = os.environ.get("TICKER_AVGO", "AVGO")  # Broadcom, Nasdaq
+
+
+# ── Orari di New York ─────────────────────────────────────────────────────────
+APERTURA_USA_ET = time(9, 30)      # prima candela 15 min = opening range
+CHIUSURA_INTRADAY_ET = time(15, 45)  # chiudi le intraday USA 15 min prima della chiusura
+
+
+def adesso_et() -> datetime:
+    return datetime.now(ET_TZ)
+
+
+def in_orario_et(inizio: time, fine: time, ora: Optional[datetime] = None) -> bool:
+    """True se l'ora di New York (adesso, o `ora`) è tra inizio e fine compresi."""
+    t = (ora.astimezone(ET_TZ) if ora else adesso_et()).time()
+    return inizio <= t <= fine
+
+
+def ora_it(t_et: time, giorno=None) -> str:
+    """Ora di New York -> 'HH:MM' italiana per il giorno indicato (default oggi)."""
+    d = giorno or adesso_et().date()
+    return ET_TZ.localize(datetime.combine(d, t_et)).astimezone(ROME_TZ).strftime("%H:%M")
+
+
+def _vwap_giornaliero_et(df: pd.DataFrame) -> pd.Series:
+    """VWAP che riparte ogni giorno di borsa USA (data di New York)."""
+    giorni = df.index.tz_convert(ET_TZ).date
+    parts = []
+    for d in pd.unique(giorni):
+        g = df[giorni == d]
+        tp = (g["High"] + g["Low"] + g["Close"]) / 3
+        parts.append((tp * g["Volume"]).cumsum() / g["Volume"].cumsum())
+    return pd.concat(parts).reindex(df.index)
 
 
 # ── Download dati ─────────────────────────────────────────────────────────────
@@ -175,7 +213,8 @@ def check_vwap_reversal_gold() -> Optional[dict]:
             return None
         return {
             "strategia": "🟡 VWAP REVERSAL ORO",
-            "asset": "Oro (XAU/USD)",
+            "asset": "Oro (future COMEX GC)",
+            "prezzi_future": True,
             "timeframe": "15min",
             "direzione": "LONG",
             "entry": fmt(entry),
@@ -195,7 +234,8 @@ def check_vwap_reversal_gold() -> Optional[dict]:
             return None
         return {
             "strategia": "🔴 VWAP REVERSAL ORO",
-            "asset": "Oro (XAU/USD)",
+            "asset": "Oro (future COMEX GC)",
+            "prezzi_future": True,
             "timeframe": "15min",
             "direzione": "SHORT",
             "entry": fmt(entry),
@@ -273,7 +313,8 @@ def check_london_sweep_gold() -> Optional[dict]:
 
     return {
         "strategia": "🟡 LONDON SWEEP ORO",
-        "asset": "Oro (XAU/USD)",
+        "asset": "Oro (future COMEX GC)",
+        "prezzi_future": True,
         "timeframe": "15min",
         "direzione": "LONG",
         "entry": fmt(entry),
@@ -287,7 +328,7 @@ def check_london_sweep_gold() -> Optional[dict]:
 
 # ══════════════════════════════════════════════════════════════════════════════
 # STRATEGIA 3 — ORB S&P500 15min (PF 1.40)
-# Intraday — OR = prima candela 15:30, trading 15:45-21:45 CET
+# Intraday — OR = prima candela 09:30 ET (15:30 italiane), ingressi 09:45-15:45 ET
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_orb_sp500() -> Optional[dict]:
@@ -299,25 +340,19 @@ def check_orb_sp500() -> Optional[dict]:
     df["rsi14"] = rsi(df["Close"], 14)
     df["ema20"] = ema(df["Close"], 20)
 
-    # VWAP giornaliero
-    df_copy = df.copy()
-    df_copy["_d"] = df_copy.index.date
-    parts = []
-    for d, g in df_copy.groupby("_d"):
-        tp = (g["High"] + g["Low"] + g["Close"]) / 3
-        parts.append((tp * g["Volume"]).cumsum() / g["Volume"].cumsum())
-    df["vwap"] = pd.concat(parts).reindex(df.index)
+    # VWAP giornaliero (giorno di borsa USA)
+    df["vwap"] = _vwap_giornaliero_et(df)
     df.dropna(inplace=True)
 
-    now_cet = datetime.now(ROME_TZ)
-    if not (time(15, 45) <= now_cet.time() <= time(21, 45)):
+    now_et = adesso_et()
+    if not in_orario_et(time(9, 45), CHIUSURA_INTRADAY_ET, now_et):
         return None
 
-    today = now_cet.date()
-    today_df = df[df.index.date == today]
+    idx_et = df.index.tz_convert(ET_TZ)
+    today_df = df[idx_et.date == now_et.date()]
 
-    # Opening Range: prima candela 15:30
-    or_bar = today_df[today_df.index.time == time(15, 30)]
+    # Opening Range: prima candela 09:30 ET
+    or_bar = today_df[today_df.index.tz_convert(ET_TZ).time == APERTURA_USA_ET]
     if len(or_bar) == 0:
         return None
 
@@ -335,6 +370,7 @@ def check_orb_sp500() -> Optional[dict]:
     prev = df.iloc[-3]
     entry = curr["Close"]
     a = curr["atr14"]
+    chiudi = ora_it(CHIUSURA_INTRADAY_ET)
 
     # LONG: breakout sopra OR high + sopra VWAP + EMA20 crescente + RSI > 52
     if (entry > or_high + 0.1 * a and
@@ -358,7 +394,8 @@ def check_orb_sp500() -> Optional[dict]:
             "rr": "1:2.5",
             "candela": candle_label(curr.name, 15),
             "tp1": fmt(tp1),
-            "note": f"Breakout OR high {fmt(or_high)} | Sopra VWAP | TP1 {fmt(tp1)} → sposta SL a BE | Chiudi entro 21:45"
+            "chiudi_entro": chiudi,
+            "note": f"Breakout OR high {fmt(or_high)} | Sopra VWAP | TP1 {fmt(tp1)} → sposta SL a BE | Chiudi entro {chiudi}"
         }
 
     # SHORT: breakout sotto OR low + sotto VWAP + EMA20 decrescente + RSI < 48
@@ -383,7 +420,8 @@ def check_orb_sp500() -> Optional[dict]:
             "rr": "1:2.5",
             "candela": candle_label(curr.name, 15),
             "tp1": fmt(tp1),
-            "note": f"Breakout sotto OR low {fmt(or_low)} | Sotto VWAP | TP1 {fmt(tp1)} → sposta SL a BE | Chiudi entro 21:45"
+            "chiudi_entro": chiudi,
+            "note": f"Breakout sotto OR low {fmt(or_low)} | Sotto VWAP | TP1 {fmt(tp1)} → sposta SL a BE | Chiudi entro {chiudi}"
         }
 
     return None
@@ -438,7 +476,8 @@ def check_kumo_gold_4h() -> Optional[dict]:
             return None
         return {
             "strategia": "🟡 KUMO RIDER ORO 4H",
-            "asset": "Oro (XAU/USD)",
+            "asset": "Oro (future COMEX GC)",
+            "prezzi_future": True,
             "timeframe": "4H (swing)",
             "direzione": "LONG",
             "entry": fmt(entry),
@@ -459,7 +498,8 @@ def check_kumo_gold_4h() -> Optional[dict]:
             return None
         return {
             "strategia": "🔴 KUMO RIDER ORO 4H",
-            "asset": "Oro (XAU/USD)",
+            "asset": "Oro (future COMEX GC)",
+            "prezzi_future": True,
             "timeframe": "4H (swing)",
             "direzione": "SHORT",
             "entry": fmt(entry),
@@ -476,7 +516,7 @@ def check_kumo_gold_4h() -> Optional[dict]:
 # ══════════════════════════════════════════════════════════════════════════════
 # STRATEGIA 5 — KUMO RIDER NASDAQ 1H (PF 1.51)
 # Swing — overnight OK se segnale forte
-# Ichimoku 9/26/52 + RSI 40-65 + filtro orario 15:30-21:00
+# Ichimoku 9/26/52 + RSI 40-65 + filtro orario 09:30-15:00 ET (15:30-21:00 italiane)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def check_kumo_nasdaq_1h() -> Optional[dict]:
@@ -497,8 +537,7 @@ def check_kumo_nasdaq_1h() -> Optional[dict]:
         return None
 
     # Usa [-2] = ultima candela 1H chiusa, [-1] è ancora in formazione
-    last_cet = df.index[-2].tz_convert(ROME_TZ)
-    if not (time(15, 30) <= last_cet.time() <= time(21, 0)):
+    if not in_orario_et(APERTURA_USA_ET, time(15, 0), df.index[-2]):
         return None
 
     curr = df.iloc[-2]
@@ -559,7 +598,7 @@ def check_kumo_nasdaq_1h() -> Optional[dict]:
 
 # ══════════════════════════════════════════════════════════════════════════════
 # STRATEGIE 6-8 — ORB SU AZIONI SINGOLE (ANT, CAT, AVGO) 15min
-# Intraday — OR = prima candela 15:30, ingressi 16:00-20:30 CET
+# Intraday — OR = prima candela 09:30 ET, ingressi 10:00-14:30 ET (16:00-20:30 italiane)
 #
 # Stessa logica dell'ORB S&P500, con adattamenti ai titoli singoli:
 #  - OR più largo ammesso (3.0 × ATR invece di 2.5)
@@ -589,20 +628,14 @@ def _check_orb_azione(ticker: str, nome: str, asset: str, short_ok: bool,
     df["rsi14"] = rsi(df["Close"], 14)
     df["ema20"] = ema(df["Close"], 20)
 
-    # VWAP giornaliero
-    df_copy = df.copy()
-    df_copy["_d"] = df_copy.index.date
-    parts = []
-    for d, g in df_copy.groupby("_d"):
-        tp = (g["High"] + g["Low"] + g["Close"]) / 3
-        parts.append((tp * g["Volume"]).cumsum() / g["Volume"].cumsum())
-    df["vwap"] = pd.concat(parts).reindex(df.index)
+    # VWAP giornaliero (giorno di borsa USA)
+    df["vwap"] = _vwap_giornaliero_et(df)
     df.dropna(inplace=True)
     if len(df) < 3:
         return None
 
-    now_cet = datetime.now(ROME_TZ)
-    if not (time(16, 0) <= now_cet.time() <= time(20, 30)):
+    now_et = adesso_et()
+    if not in_orario_et(time(10, 0), time(14, 30), now_et):
         return None
 
     # Usa [-2] = ultima candela chiusa, [-1] è ancora in formazione
@@ -612,13 +645,14 @@ def _check_orb_azione(ticker: str, nome: str, asset: str, short_ok: bool,
     # Dati freschi: la candela deve essere di oggi e chiusa da poco.
     # Evita segnali su dati vecchi (festivi, mezze sedute, ritardi di Yahoo).
     fine_candela = curr.name + pd.Timedelta(minutes=15)
-    if curr.name.date() != now_cet.date() or (now_cet - fine_candela) > pd.Timedelta(minutes=25):
+    if (curr.name.tz_convert(ET_TZ).date() != now_et.date()
+            or (now_et - fine_candela) > pd.Timedelta(minutes=25)):
         return None
 
-    today_df = df[df.index.date == now_cet.date()]
+    today_df = df[df.index.tz_convert(ET_TZ).date == now_et.date()]
 
-    # Opening Range: prima candela 15:30
-    or_bar = today_df[today_df.index.time == time(15, 30)]
+    # Opening Range: prima candela 09:30 ET
+    or_bar = today_df[today_df.index.tz_convert(ET_TZ).time == APERTURA_USA_ET]
     if len(or_bar) == 0:
         return None
 
@@ -633,6 +667,7 @@ def _check_orb_azione(ticker: str, nome: str, asset: str, short_ok: bool,
 
     entry = curr["Close"]
     a = curr["atr14"]
+    chiudi = ora_it(CHIUSURA_INTRADAY_ET)
 
     # LONG: breakout sopra OR high + sopra VWAP + EMA20 crescente + RSI > 52
     if (entry > or_high + 0.1 * a and
@@ -656,8 +691,9 @@ def _check_orb_azione(ticker: str, nome: str, asset: str, short_ok: bool,
             "rr": "1:2.5",
             "candela": candle_label(curr.name, 15),
             "tp1": fmt(tp1),
+            "chiudi_entro": chiudi,
             "note": f"Breakout OR high {fmt(or_high)} | Sopra VWAP | TP1 {fmt(tp1)} → sposta SL a BE | "
-                    f"{nota_extra} | Chiudi entro 21:45"
+                    f"{nota_extra} | Chiudi entro {chiudi}"
         }
 
     # SHORT (se abilitato): breakout sotto OR low + sotto VWAP + EMA20 decrescente + RSI < 48
@@ -683,8 +719,9 @@ def _check_orb_azione(ticker: str, nome: str, asset: str, short_ok: bool,
             "rr": "1:2.5",
             "candela": candle_label(curr.name, 15),
             "tp1": fmt(tp1),
+            "chiudi_entro": chiudi,
             "note": f"Breakout sotto OR low {fmt(or_low)} | Sotto VWAP | TP1 {fmt(tp1)} → sposta SL a BE | "
-                    f"{nota_extra} | Chiudi entro 21:45"
+                    f"{nota_extra} | Chiudi entro {chiudi}"
         }
 
     return None
@@ -716,7 +753,7 @@ def check_orb_avgo() -> Optional[dict]:
 #   Uscita:  chiusura sopra la media a 5 giorni | stop = 3 × ATR(14) | max 10 giorni
 # Stesse regole di `python3 backtest.py trend` / `trend_azioni`.
 # ⚠️ Il bot NON conosce le tue posizioni: segue una posizione TEORICA dal segnale
-#    e ti manda un promemoria serale. Dopo un riavvio la memoria si azzera.
+#    e ti manda un promemoria serale. La posizione teorica è salvata su file (stato.py).
 # ⚠️ Nel backtest l'uscita avviene alla chiusura; qui si esce all'apertura del
 #    giorno dopo (riga "Uscita apertura dopo" del backtest).
 # ══════════════════════════════════════════════════════════════════════════════
