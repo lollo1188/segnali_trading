@@ -80,8 +80,9 @@ def _scadenza(name: str, fine: datetime) -> datetime:
     return fine + timedelta(days=GIORNI_SWING)
 
 
-def registra(name: str, ticker: str, signal: dict, inviato: Optional[datetime] = None) -> None:
-    """Salva un segnale appena inviato."""
+def registra(name: str, ticker: str, signal: dict, inviato: Optional[datetime] = None,
+             ombra: bool = False) -> None:
+    """Salva un segnale appena inviato (ombra=True: modalità solo registro, non inviato)."""
     try:
         fine = signal.get("candela_fine")
         if fine is None:
@@ -96,6 +97,8 @@ def registra(name: str, ticker: str, signal: dict, inviato: Optional[datetime] =
             "scadenza": _scadenza(name, fine),
             "esito": None, "uscita": None, "r": None, "chiuso": None,
         }
+        if ombra:
+            rec["ombra"] = True
         with _lock:
             _tutti().append(rec)
             _salva()
@@ -186,15 +189,18 @@ def _statistiche(recs: List[dict]) -> dict:
             d = 1 if r["direzione"] == "LONG" else -1
             slip.append((r["prezzo_invio"] - r["entry"]) * d / abs(r["entry"] - r["sl"]) * 100)
     ritardi = [(r["inviato"] - r["candela_fine"]).total_seconds() / 60 for r in recs]
+    ombra = bool(recs) and all(r.get("ombra") for r in recs)
     return {"n": len(recs), "chiusi": len(chiusi), "aperti": sum(1 for r in recs if r.get("esito") is None),
             "vinti": len(vinti), "persi": len(persi), "r_tot": sum(vinti) + sum(persi), "pf": pf,
             "slip": sum(slip) / len(slip) if slip else None,
-            "ritardo": sum(ritardi) / len(ritardi) if ritardi else None}
+            "ritardo": sum(ritardi) / len(ritardi) if ritardi else None, "ombra": ombra}
 
 
 def _riga(nome: str, s: dict) -> str:
     if s["n"] == 0:
         return ""
+    if s.get("ombra"):
+        nome += " 👻 <i>solo registro</i>"
     pf = "—" if s["pf"] is None else ("∞" if s["pf"] == float("inf") else f"{s['pf']:.2f}".replace(".", ","))
     riga = (f"<b>{nome}</b>: {s['n']} segnali | ✅ {s['vinti']} ❌ {s['persi']}"
             + (f" ⏳ {s['aperti']}" if s["aperti"] else "")

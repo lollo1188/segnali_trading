@@ -140,19 +140,34 @@ SIGNAL_TICKER = {
 NOMI_STRATEGIE = list(SIGNAL_TICKER.keys())
 
 
-def _leggi_spente():
-    grezzo = os.environ.get("STRATEGIE_SPENTE", "")
+def _leggi_elenco(variabile, validi=None):
+    validi = set(validi or NOMI_STRATEGIE)
+    grezzo = os.environ.get(variabile, "")
     nomi = {x.strip().lower() for x in grezzo.replace(";", ",").replace(" ", ",").split(",") if x.strip()}
-    sconosciute = nomi - set(NOMI_STRATEGIE)
+    sconosciute = nomi - validi
     if sconosciute:
-        logger.warning(f"STRATEGIE_SPENTE: nomi non riconosciuti (ignorati): {sorted(sconosciute)}. "
-                       f"Nomi validi: {NOMI_STRATEGIE}")
-    return nomi & set(NOMI_STRATEGIE)
+        logger.warning(f"{variabile}: nomi non riconosciuti (ignorati): {sorted(sconosciute)}. "
+                       f"Nomi validi: {sorted(validi)}")
+    return nomi & validi
 
 
-STRATEGIE_SPENTE = _leggi_spente()
+def _leggi_spente():
+    return _leggi_elenco("STRATEGIE_SPENTE")
+
+
+# ── Modalità "solo registro" (ombra) ──────────────────────────────────────────
+# Su Railway → Variables:  STRATEGIE_OMBRA = orb_cat,orb_avgo
+# La strategia gira normalmente ma i segnali NON vengono inviati su Telegram: finiscono
+# solo nel registro e nel resoconto del sabato ("solo registro"), così la misuri senza
+# riceverla. Vince su STRATEGIE_SPENTE: puoi lasciarla anche tra le spente.
+# Il ritracciamento giornaliero (pullback_*) non è supportato: il registro non lo segue.
+STRATEGIE_OMBRA = _leggi_elenco("STRATEGIE_OMBRA",
+                                [n for n in NOMI_STRATEGIE if not n.startswith("pullback_")])
+STRATEGIE_SPENTE = _leggi_spente() - STRATEGIE_OMBRA
 if STRATEGIE_SPENTE:
     logger.info(f"Strategie SPENTE da STRATEGIE_SPENTE: {sorted(STRATEGIE_SPENTE)}")
+if STRATEGIE_OMBRA:
+    logger.info(f"Strategie SOLO REGISTRO da STRATEGIE_OMBRA: {sorted(STRATEGIE_OMBRA)}")
 
 
 def should_send(name, direction, cooldown_h=4):
@@ -241,7 +256,7 @@ def blocco_rischio(name, direzione):
     try:
         aperte = []                                   # (strategia, direzione)
         if registro is not None:
-            aperte += [(r["strategia"], r["direzione"]) for r in registro.aperti()]
+            aperte += [(r["strategia"], r["direzione"]) for r in registro.aperti() if not r.get("ombra")]
         aperte += [(k, "LONG") for k in posizioni_pb if k != name]
         if not aperte:
             return ""
@@ -272,6 +287,15 @@ def run_check(name, fn, cooldown_h=4):
             _pianifica_ripetizione(name, fn, cooldown_h)
             return
         signal = fn()
+        if signal and name in STRATEGIE_OMBRA:
+            # Solo registro: niente Telegram, stessa pausa tra segnali del bot vero
+            if should_send(name, signal["direzione"], cooldown_h):
+                register(name, signal["direzione"])
+                if registro is not None:
+                    registro.registra(name, SIGNAL_TICKER.get(name, ""), signal, ombra=True)
+                logger.info(f"[{name}] Segnale SOLO REGISTRO: {signal['direzione']} (non inviato)")
+            _esito_job(name)
+            return
         if signal and should_send(name, signal["direzione"], cooldown_h):
             # Prezzo attuale al momento dell'invio → il messaggio mostra lo slittamento.
             # Se non disponibile, il messaggio parte senza il blocco slittamento.
@@ -510,7 +534,8 @@ def job_battito():
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 logger.info("═══════════════════════════════════════")
-logger.info(f" TRADING BOT — {len(NOMI_STRATEGIE) - len(STRATEGIE_SPENTE)} strategie attive su {len(NOMI_STRATEGIE)}")
+logger.info(f" TRADING BOT — {len(NOMI_STRATEGIE) - len(STRATEGIE_SPENTE) - len(STRATEGIE_OMBRA)} strategie attive"
+            f" su {len(NOMI_STRATEGIE)}" + (f", {len(STRATEGIE_OMBRA)} solo registro" if STRATEGIE_OMBRA else ""))
 logger.info("═══════════════════════════════════════")
 
 try:
@@ -571,7 +596,7 @@ try:
             f"{PULLBACK[k][1]} (ingresso {v['entry_date']:%d/%m})" for k, v in posizioni_pb.items() if k in PULLBACK)
     else:
         _nota = "💾 Memoria ripristinata"
-    if send_startup_message(sorted(STRATEGIE_SPENTE), _nota):
+    if send_startup_message(sorted(STRATEGIE_SPENTE), _nota, sorted(STRATEGIE_OMBRA)):
         logger.info("Messaggio avvio inviato")
     else:
         logger.error("Messaggio avvio NON inviato (vedi errore Telegram sopra)")
