@@ -1,9 +1,11 @@
-import os, logging, threading, time as time_module
+import os, sys, logging, threading, time as time_module
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, time, timedelta
 import pytz
 
-logging.basicConfig(level=logging.INFO,
+# Log su stdout: Railway marca come "error" tutto ciò che arriva da stderr, e così
+# anche i messaggi normali sembravano errori. Il livello resta nel testo ([INFO], [ERROR]).
+logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
