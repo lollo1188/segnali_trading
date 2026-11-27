@@ -84,17 +84,20 @@ Le finestre sono definite in **ora di New York** e convertite in ora italiana pe
 | Giorno dei risultati trimestrali | Date in elenco per titolo | ORB sul singolo titolo |
 
 **Calendario inserito** (da verificare periodicamente su BLS, Federal Reserve, NYSE e comunicati delle società):
-- NFP 4/12/2026, FOMC 9/12/2026, CPI 10/12/2026, 13/1/2027, 11/2/2027, 10/3/2027
-- Chiusure USA: 26/11/2026, 25/12/2026, 1/1/2027; mezze sedute: 27/11/2026 e 24/12/2026
+- NFP e CPI: da dicembre 2026 a dicembre 2027 (tutte le uscite mensili)
+- FOMC: 9/12/2026 e le 7 decisioni del 2027 (27/1, 17/3, 28/4, 9/6, 28/7, 15/9, 17/11), dal calendario Fed rivisto il 12/11/2026. La riunione del 26-27/10/2027 è solo di strategia, senza decisione
+- Chiusure USA 2026-2027 complete (fonte NYSE); mezze sedute: 27/11/2026, 24/12/2026, 26/11/2027
 - Utili Broadcom: reazione del titolo il 10/12/2026 (risultati il 9/12 dopo la chiusura)
-- **Da completare**: NFP e FOMC 2027, altre chiusure 2027, utili di Caterpillar e Anthropic
+- Utili Caterpillar: 28/1/2027 prima dell'apertura (reazione lo stesso giorno)
+- **Da completare**: utili di Anthropic; calendario 2028
 
 **Ripresa dei controlli:** se un controllo viene saltato per una notizia e il blocco finisce entro 2 ore, il bot lo ripete un minuto dopo la fine del blocco, così la candela non va persa. Per blocchi lunghi (festivi, giorno degli utili) non ripete.
 
 **Limiti da conoscere:**
 - Il calendario si aggiorna a mano: se manca una data, il bot non blocca nulla.
 - Non copre ISM, discorsi Fed, PCE e altri dati non inseriti, né notizie improvvise.
-- Le date degli utili di CAT e ANT non sono ancora inserite.
+- La data degli utili di ANT non è ancora inserita.
+- Il calendario copre fino a dicembre 2027: va esteso al 2028.
 - Gli orari dell'oro nei giorni festivi sono un'approssimazione: verifica quelli del tuo CFD.
 - Le strategie hanno comunque orari propri in ora italiana (per esempio la candela delle 15:30 per l'ORB) che restano sfasati nelle settimane con ora legale non allineata.
 

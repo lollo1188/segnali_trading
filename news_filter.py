@@ -47,13 +47,46 @@ FINESTRA_DATI_ET = (time(8, 25), time(8, 50))
 # Valgono per TUTTE le strategie (anche le swing).
 # 08:30 ET: NFP e CPI. 14:00 ET: decisione FOMC (conferenza stampa 14:30 ET).
 EVENTI_ALTO_IMPATTO = [
-    (date(2026, 12, 4),  time(8, 20),  time(9, 45),  "NFP novembre (08:30 ET)"),
-    (date(2026, 12, 9),  time(13, 50), time(15, 15), "FOMC dicembre (decisione 14:00 ET)"),
-    (date(2026, 12, 10), time(8, 20),  time(9, 45),  "CPI novembre (08:30 ET)"),
-    (date(2027, 1, 13),  time(8, 20),  time(9, 45),  "CPI dicembre (08:30 ET)"),
-    (date(2027, 2, 11),  time(8, 20),  time(9, 45),  "CPI gennaio (08:30 ET)"),
-    (date(2027, 3, 10),  time(8, 20),  time(9, 45),  "CPI febbraio (08:30 ET)"),
-    # TODO: aggiungi NFP 2027, altri FOMC 2027, PCE, ecc. dal calendario BLS/Fed.
+    # Fonti: BLS (Employment Situation e CPI 2027), Federal Reserve (calendario FOMC
+    # rivisto il 12/11/2026: niente riunione di ottobre con decisione, quella di
+    # dicembre anticipata al 16-17 novembre). Le date FOMC sono provvisorie finché
+    # non vengono confermate alla riunione precedente.
+    # Il 26-27/10/2027 la Fed si riunisce solo per discutere la strategia: nessuna decisione, nessun blocco.
+    (date(2026, 12, 4),    time(8, 20),  time(9, 45),  "NFP novembre (08:30 ET)"),
+    (date(2026, 12, 9),    time(13, 50), time(15, 15), "FOMC dicembre (decisione 14:00 ET)"),
+    (date(2026, 12, 10),   time(8, 20),  time(9, 45),  "CPI novembre (08:30 ET)"),
+    (date(2027, 1, 8),     time(8, 20),  time(9, 45),  "NFP dicembre (08:30 ET)"),
+    (date(2027, 1, 13),    time(8, 20),  time(9, 45),  "CPI dicembre (08:30 ET)"),
+    (date(2027, 1, 27),    time(13, 50), time(15, 15), "FOMC gennaio (decisione 14:00 ET)"),
+    (date(2027, 2, 5),     time(8, 20),  time(9, 45),  "NFP gennaio (08:30 ET)"),
+    (date(2027, 2, 11),    time(8, 20),  time(9, 45),  "CPI gennaio (08:30 ET)"),
+    (date(2027, 3, 5),     time(8, 20),  time(9, 45),  "NFP febbraio (08:30 ET)"),
+    (date(2027, 3, 10),    time(8, 20),  time(9, 45),  "CPI febbraio (08:30 ET)"),
+    (date(2027, 3, 17),    time(13, 50), time(15, 15), "FOMC marzo (decisione 14:00 ET)"),
+    (date(2027, 4, 2),     time(8, 20),  time(9, 45),  "NFP marzo (08:30 ET)"),
+    (date(2027, 4, 13),    time(8, 20),  time(9, 45),  "CPI marzo (08:30 ET)"),
+    (date(2027, 4, 28),    time(13, 50), time(15, 15), "FOMC aprile (decisione 14:00 ET)"),
+    (date(2027, 5, 7),     time(8, 20),  time(9, 45),  "NFP aprile (08:30 ET)"),
+    (date(2027, 5, 12),    time(8, 20),  time(9, 45),  "CPI aprile (08:30 ET)"),
+    (date(2027, 6, 4),     time(8, 20),  time(9, 45),  "NFP maggio (08:30 ET)"),
+    (date(2027, 6, 9),     time(13, 50), time(15, 15), "FOMC giugno (decisione 14:00 ET)"),
+    (date(2027, 6, 10),    time(8, 20),  time(9, 45),  "CPI maggio (08:30 ET)"),
+    (date(2027, 7, 2),     time(8, 20),  time(9, 45),  "NFP giugno (08:30 ET)"),
+    (date(2027, 7, 14),    time(8, 20),  time(9, 45),  "CPI giugno (08:30 ET)"),
+    (date(2027, 7, 28),    time(13, 50), time(15, 15), "FOMC luglio (decisione 14:00 ET)"),
+    (date(2027, 8, 6),     time(8, 20),  time(9, 45),  "NFP luglio (08:30 ET)"),
+    (date(2027, 8, 11),    time(8, 20),  time(9, 45),  "CPI luglio (08:30 ET)"),
+    (date(2027, 9, 3),     time(8, 20),  time(9, 45),  "NFP agosto (08:30 ET)"),
+    (date(2027, 9, 14),    time(8, 20),  time(9, 45),  "CPI agosto (08:30 ET)"),
+    (date(2027, 9, 15),    time(13, 50), time(15, 15), "FOMC settembre (decisione 14:00 ET)"),
+    (date(2027, 10, 8),    time(8, 20),  time(9, 45),  "NFP settembre (08:30 ET)"),
+    (date(2027, 10, 14),   time(8, 20),  time(9, 45),  "CPI settembre (08:30 ET)"),
+    (date(2027, 11, 5),    time(8, 20),  time(9, 45),  "NFP ottobre (08:30 ET)"),
+    (date(2027, 11, 10),   time(8, 20),  time(9, 45),  "CPI ottobre (08:30 ET)"),
+    (date(2027, 11, 17),   time(13, 50), time(15, 15), "FOMC novembre (decisione 14:00 ET)"),
+    (date(2027, 12, 3),    time(8, 20),  time(9, 45),  "NFP novembre (08:30 ET)"),
+    (date(2027, 12, 10),   time(8, 20),  time(9, 45),  "CPI novembre (08:30 ET)"),
+    # TODO: aggiungi il calendario 2028 quando BLS e Fed lo pubblicano.
 ]
 
 # Giorni in cui Wall Street è chiusa (fonte: NYSE). Blocca le strategie USA.
@@ -61,13 +94,23 @@ GIORNI_USA_CHIUSI = {
     date(2026, 11, 26),   # Thanksgiving
     date(2026, 12, 25),   # Natale
     date(2027, 1, 1),     # Capodanno
-    # TODO: aggiungi le chiusure 2027 (MLK, Presidents' Day, Good Friday 26/3/2027, ...)
+    date(2027, 1, 18),    # Martin Luther King Jr. Day
+    date(2027, 2, 15),    # Presidents' Day
+    date(2027, 3, 26),    # Venerdì Santo
+    date(2027, 5, 31),    # Memorial Day
+    date(2027, 6, 18),    # Juneteenth (il 19 è sabato)
+    date(2027, 7, 5),     # Independence Day (il 4 è domenica)
+    date(2027, 9, 6),     # Labor Day
+    date(2027, 11, 25),   # Thanksgiving
+    date(2027, 12, 24),   # Natale (il 25 è sabato)
+    # Il 31/12/2027 la borsa è aperta (Capodanno 2028 cade di sabato e non si recupera).
 }
 
 # Mezze sedute: giorno -> ora di chiusura ET. Dopo quell'ora il bot non cerca segnali.
 MEZZE_SEDUTE_USA = {
     date(2026, 11, 27): time(13, 0),   # giorno dopo Thanksgiving
     date(2026, 12, 24): time(13, 0),   # vigilia di Natale
+    date(2027, 11, 26): time(13, 0),   # giorno dopo Thanksgiving (unica mezza seduta 2027)
 }
 
 # Giorni in cui il mercato dell'oro è sostanzialmente chiuso. APPROSSIMAZIONE: verifica
@@ -82,8 +125,10 @@ GIORNI_ORO_CHIUSI = {
 UTILI = {
     # Broadcom: risultati mercoledì 9/12/2026 dopo la chiusura -> reazione giovedì 10/12
     "orb_avgo": [date(2026, 12, 10)],
-    # TODO: aggiungi la data quando Caterpillar e Anthropic annunciano i risultati.
-    "orb_cat": [],
+    # Caterpillar: risultati giovedì 28/1/2027 prima dell'apertura USA (data indicata da
+    # Revolut) -> reazione lo stesso giorno. Conferma su investors.caterpillar.com.
+    # Anthropic: prima trimestrale da società quotata non ancora annunciata.
+    "orb_cat": [date(2027, 1, 28)],
     "orb_ant": [],
     # Ritracciamento giornaliero: si guarda il giorno in cui si ENTRA (apertura del giorno dopo il segnale).
     "pullback_avgo": [date(2026, 12, 10)],
