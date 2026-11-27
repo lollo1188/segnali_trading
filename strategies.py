@@ -22,7 +22,6 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-import requests
 import yfinance as yf
 import pytz
 
@@ -288,7 +287,6 @@ def check_london_sweep_gold() -> Optional[dict]:
 
     # Usa [-2] = ultima candela chiusa, [-1] è ancora in formazione
     curr = window.iloc[-2]
-    a = curr["atr14"]
 
     # Sweep: candela corrente ha toccato sotto asia_low di $2-$5
     sweep_depth = asia_low - curr["Low"]

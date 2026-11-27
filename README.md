@@ -6,7 +6,7 @@ Bot di segnali semi-automatico per i CFD di Revolut. Gira H24 su Railway e ti ma
 
 ## ⚙️ Strategie incluse
 
-| # | Nome | Asset | Timeframe | Logica | Finestra CET |
+| # | Nome | Asset | Timeframe | Logica | Finestra (ora italiana) |
 |---|------|-------|-----------|--------|--------------|
 | 1 | VWAP Reversal | Oro | 15min | Prezzo oltre ±2σ dal VWAP + RSI estremo + candela di inversione | 08:00–21:45 |
 | 2 | London Sweep | Oro | 15min | Falso breakdown del range asiatico (06:00–08:00) | 08:00–10:00 |
@@ -19,9 +19,9 @@ Bot di segnali semi-automatico per i CFD di Revolut. Gira H24 su Railway e ti ma
 | 9 | Ritracciamento S&P500 | S&P 500 | Giornaliero | RSI(2) < 10 sopra media 200gg, solo long | Controllo ~22:10 |
 | 10 | Ritracciamento Broadcom | AVGO | Giornaliero | Come sopra | Controllo ~22:10 |
 
-Le strategie 1, 2, 3, 6, 7 e 8 sono **intraday**: chiudi entro le 21:45 CET. Le strategie 4 e 5 possono restare aperte overnight.
+Le strategie 1, 2, 3, 6, 7 e 8 sono **intraday**: chiudi entro l'ora indicata nel messaggio (21:45 italiane; per le strategie USA 20:45 nelle settimane con ora legale sfasata). Le strategie 4 e 5 possono restare aperte overnight. Gli orari delle strategie USA (3, 5, 6–10) seguono l'ora di New York: vedi *Quando arrivano i segnali*.
 
-Dopo un segnale, la stessa strategia nella stessa direzione non viene riproposta per un periodo di pausa (4–12 ore a seconda della strategia). Questa pausa è salvata nel file di stato (vedi *Memoria del bot* sotto) e sopravvive ai riavvii.
+Dopo un segnale, la stessa strategia nella stessa direzione non viene riproposta per un periodo di pausa (4–12 ore a seconda della strategia). Questa pausa è salvata nel file di stato e sopravvive ai riavvii, se su Railway c'è il volume `/data` (vedi STEP 4b).
 
 ### Strategie su azioni singole (6, 7, 8)
 
@@ -224,7 +224,7 @@ Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine s
 - **Dati Yahoo Finance**, non il prezzo del CFD di Revolut. Per l'oro è il future, con prezzi diversi dallo spot: usa le distanze.
 - I controlli girano ogni 15 minuti dall'avvio, non allineati alle candele: l'entry può essere vecchia fino a circa 15 minuti. Per questo esiste il blocco slittamento.
 - Il backtest (`backtest.py`) usa ancora l'opening range delle 15:30 italiane: nelle settimane con ora legale sfasata simula la candela sbagliata (pochi giorni l'anno, effetto piccolo).
-- Il bot non conosce i giorni festivi o le mezze sedute di Wall Street. Le strategie su azioni (6, 7, 8) controllano che la candela sia recente; le altre no, e in quei giorni possono proporre segnali basati su candele vecchie. Ignorali.
+- Festivi e mezze sedute di Wall Street sono bloccati dal filtro notizie solo se sono nel calendario di `news_filter.py` (oggi fino a fine 2027). Le strategie su azioni (6, 7, 8) controllano anche che la candela sia recente; le altre no, quindi con una data mancante possono proporre segnali su candele vecchie. Ignorali.
 - Il filtro notizie dipende da un calendario che aggiorni tu e non copre le notizie impreviste (vedi sezione dedicata).
 - Non segue le operazioni: non controlla stop e target e non ti avvisa del TP1 o della chiusura serale.
 - Il limite "max 4% totale" nel messaggio di avvio è solo un promemoria.

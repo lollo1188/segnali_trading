@@ -100,7 +100,6 @@ def _blocco_distanze(signal: dict) -> str:
     except (KeyError, TypeError, ValueError):
         return ""
     is_long = signal.get("direzione") == "LONG"
-    segno = 1 if is_long else -1
     parti = [f"stop <code>{sl - entry:+.2f}</code>"]
     try:
         if signal.get("tp1"):
@@ -120,7 +119,6 @@ def _blocco_distanze(signal: dict) -> str:
 
 def send_telegram(signal: dict) -> bool:
     now  = datetime.now(ROME_TZ).strftime("%d/%m %H:%M")
-    tipo = "🟢 LONG" if signal.get("direzione") == "LONG" else "🔴 SHORT"
     chiudi = signal.get("chiudi_entro", "21:45")
     overnight = "⏰ <b>SWING — può restare overnight</b>" if "4H" in signal.get("timeframe","") or "1H" in signal.get("timeframe","") else f"⏱ <b>INTRADAY — chiudi entro le {chiudi} (ora italiana)</b>"
 
