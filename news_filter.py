@@ -244,3 +244,9 @@ def utili_il(strategia: str, d: date) -> bool:
 def eventi_del_giorno(d: date) -> List[str]:
     """Eventi ad alto impatto (NFP, CPI, FOMC...) in calendario per il giorno d (data USA)."""
     return [desc for (dd, _, _, desc) in EVENTI_ALTO_IMPATTO if dd == d]
+
+
+def fine_calendario() -> date:
+    """Ultima data coperta dal calendario (eventi ad alto impatto e chiusure USA).
+    Dopo questa data il filtro non blocca più NFP, CPI, FOMC e festività."""
+    return max(max(d for (d, _, _, _) in EVENTI_ALTO_IMPATTO), max(GIORNI_USA_CHIUSI))

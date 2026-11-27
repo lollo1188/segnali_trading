@@ -1304,11 +1304,10 @@ def backtest_kumo_nasdaq_1h():
     df = _indice_roma(df)
 
     def orario(ts):
-        # Il bot controlla alle :05 di ogni ora tra 09:30 e 15:00 di New York: l'ultima
-        # candela chiusa valutata è quella delle 12:30 (la 13:30 si chiude alle 14:30 ma
-        # viene letta solo alle 15:05, fuori finestra).
+        # Il bot controlla alle :32 di ogni ora fino alle 15:35 di New York, subito dopo la
+        # chiusura delle candele orarie (:30): valuta le candele con inizio 09:30–14:30.
         t = ts.tz_convert(ET_TZ).time()
-        return time(9, 30) <= t <= time(12, 30)
+        return time(9, 30) <= t <= time(15, 0)
     # uscita forzata dopo 70 candele 1H (~10 sedute)
     signals = _segnali_kumo(df, filtro_orario=orario, pausa_ore=8, max_candele=70)
     if not signals:

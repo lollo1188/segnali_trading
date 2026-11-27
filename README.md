@@ -63,8 +63,8 @@ Le strategie USA (ORB, Kumo Nasdaq, ritracciamento) seguono l'**ora di New York*
 | London Sweep Oro | ~08:30–10:00 | Solo long |
 | ORB S&P500 | ~16:00–21:45 | Al massimo uno al giorno per direzione |
 | ORB ANT / CAT / AVGO | ~16:00–20:30 | Come sopra |
-| Kumo Rider Oro 4H | ~20 minuti dopo la chiusura di una candela 4H (controllo ogni ora) | Raro: serve un incrocio Ichimoku |
-| Kumo Rider Nasdaq 1H | ~17:05, 18:05, 19:05, 20:05 | Raro |
+| Kumo Rider Oro 4H | ~2 minuti dopo la chiusura di una candela 4H (controllo ogni ora) | Raro: serve un incrocio Ichimoku |
+| Kumo Rider Nasdaq 1H | ~16:32, 17:32, 18:32, 19:32, 20:32, 21:32 (2 minuti dopo ogni candela oraria) | Raro |
 | Ritracciamento S&P500 / AVGO | ~22:10 e 22:40, lun–ven | Pochi segnali all'anno; promemoria serali finché la posizione teorica è aperta |
 
 Sono finestre possibili, non garantite: il segnale arriva solo se le condizioni sono vere. Nel weekend e nei giorni festivi USA il bot è silenzioso. In più il filtro notizie (sotto) può saltare alcuni controlli.
@@ -102,6 +102,32 @@ Le finestre sono definite in **ora di New York** e convertite in ora italiana pe
 - Il calendario copre fino a dicembre 2027: va esteso al 2028.
 - Gli orari dell'oro nei giorni festivi sono un'approssimazione: verifica quelli del tuo CFD.
 - Le strategie USA usano anch'esse l'ora di New York (opening range = candela delle 09:30 ET). Le strategie sull'oro restano in ora italiana.
+
+---
+
+## 📒 Registro dei segnali e resoconto settimanale (`registro.py`)
+
+Ogni segnale inviato viene salvato in `registro.json`, accanto al file di stato (su Railway il volume `/data`). Ogni 30 minuti il bot controlla sulle candele successive come sarebbe andato, con **le stesse regole del backtest**:
+- stop o target toccati (se nella stessa candela succedono entrambi conta lo stop);
+- altrimenti chiusura forzata: intraday all'ora di chiusura del messaggio (21:45 italiane per l'oro, 15:45 di New York per l'ORB), Kumo dopo 14 giorni.
+
+Il risultato è in **R** (multipli del rischio: +2,5R = target dell'ORB, −1R = stop), al netto dello spread stimato.
+
+**Ogni sabato alle 10:07** arriva su Telegram il resoconto: per ogni strategia segnali della settimana e totale da inizio registro, vinti/persi, R totale, PF, slittamento medio al momento dell'invio e ritardo medio rispetto alla chiusura della candela.
+
+- È un esito **teorico**: non sa se hai aperto il CFD né a che prezzo. Non simula TP1, break-even e trailing (come il backtest).
+- Il ritracciamento giornaliero (9, 10) non è incluso: ha già i suoi promemoria serali.
+- Con meno di circa 30 segnali per strategia non trarre conclusioni.
+
+---
+
+## 🚨 Avvisi automatici
+
+Il bot ti scrive su Telegram quando:
+- una strategia va in errore per **3 controlli di fila** (e di nuovo quando torna a funzionare);
+- **Yahoo non restituisce dati** per uno strumento da più di 45 minuti (e quando tornano);
+- il **calendario notizie** sta per finire: dai 60 giorni prima dell'ultima data, al massimo una volta a settimana;
+- lo **scheduler si blocca**: se per 20 minuti non dà segni di vita il bot si riavvia da solo (Railway lo riavvia) e il controllo di salute risponde `503` invece di `OK`.
 
 ---
 
@@ -210,10 +236,10 @@ Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine s
 
 **Limiti da tenere presenti:**
 - Per i dati a 15 minuti Yahoo Finance fornisce solo circa 60 giorni: l'ORB viene testato su poche decine di trade, troppo poche per un PF affidabile.
-- Backtest `bot` (eseguito il 27/11/2026, costi Revolut attuali): **VWAP Reversal Oro** PF 1,71 su 10 trade (60 giorni); **London Sweep Oro** PF 0,69 su 8 trade (60 giorni); **Kumo Rider Oro 4H** PF 0,83 su 10 trade (2 anni); **Kumo Rider Nasdaq 1H** PF 0,00 su 4 trade (2 anni, tutti in perdita). Con costi raddoppiati (`COSTI_X=2`) i risultati cambiano poco. Campioni minuscoli: **nessuna delle quattro dimostra un vantaggio**, e tre su quattro sono sotto 1. I PF scritti in passato (1.84, 1.55, 1.62, 1.51) non sono confermati.
+- Backtest `bot` (eseguito il 27/11/2026, costi Revolut attuali): **VWAP Reversal Oro** PF 1,71 su 10 trade (60 giorni); **London Sweep Oro** PF 0,69 su 8 trade (60 giorni); **Kumo Rider Oro 4H** PF 0,83 su 10 trade (2 anni); **Kumo Rider Nasdaq 1H** PF 0,00 su 5 trade (2 anni, tutti in perdita). Con costi raddoppiati (`COSTI_X=2`) i risultati cambiano poco. Campioni minuscoli: **nessuna delle quattro dimostra un vantaggio**, e tre su quattro sono sotto 1. I PF scritti in passato (1.84, 1.55, 1.62, 1.51) non sono confermati.
   - Semplificazioni: London Sweep senza TP1 al 50% e trailing; Kumo senza commissione notturna e con uscita forzata dopo circa 10 giorni; se nella stessa candela si toccano stop e target conta lo stop.
   - Il backtest Kumo usa la regola chikou standard (chiusura attuale contro quella di 26 candele prima) sull'ultima candela chiusa, come il bot dopo la correzione del 27/11/2026.
-  - **Bot e backtest coincidono**: `python3 verifica_backtest.py` riesegue le funzioni del bot su ogni controllo storico (stessi orari dello scheduler, stessi dati che Yahoo dava in quel momento, stesse pause tra segnali) e le confronta con il backtest. Al 27/11/2026: stessi segnali e stessi prezzi per tutte e quattro le strategie. Il Kumo Oro arriva 20 minuti dopo la chiusura della candela.
+  - **Bot e backtest coincidono**: `python3 verifica_backtest.py` riesegue le funzioni del bot su ogni controllo storico (stessi orari dello scheduler, stessi dati che Yahoo dava in quel momento, stesse pause tra segnali) e le confronta con il backtest. Al 27/11/2026: stessi segnali e stessi prezzi per tutte e quattro le strategie. Con i controlli allineati alle candele ogni segnale arriva 2 minuti dopo la chiusura della sua candela.
 - Il backtest simula un solo trade al giorno e non gestisce il TP1 con break-even.
 - Nelle varianti ORB S&P500 il filtro sull'ampiezza dell'opening range usa l'ATR dell'intera giornata, quindi anche candele future (lookahead). Il backtest `azioni` non ha questo difetto.
 - Nessun backtest include il filtro notizie.
@@ -227,11 +253,11 @@ Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine s
 ## 🧱 Limiti noti del bot
 
 - **Dati Yahoo Finance**, non il prezzo del CFD di Revolut. Per l'oro è il future, con prezzi diversi dallo spot: usa le distanze.
-- I controlli girano ogni 15 minuti dall'avvio, non allineati alle candele: l'entry può essere vecchia fino a circa 15 minuti. Per questo esiste il blocco slittamento.
+- I controlli girano 2 minuti dopo la chiusura di ogni candela (:02, :17, :32, :47; Kumo Nasdaq ai :32). Se Yahoo pubblica i dati in ritardo (succede con i future come l'oro), il segnale può riferirsi alla candela precedente: il resoconto settimanale mostra il ritardo medio reale. Lo slittamento resta da controllare.
 - Il backtest (`backtest.py`) usa ancora l'opening range delle 15:30 italiane: nelle settimane con ora legale sfasata simula la candela sbagliata (pochi giorni l'anno, effetto piccolo).
 - Festivi e mezze sedute di Wall Street sono bloccati dal filtro notizie solo se sono nel calendario di `news_filter.py` (oggi fino a fine 2027). Le strategie su azioni (6, 7, 8) controllano anche che la candela sia recente; le altre no, quindi con una data mancante possono proporre segnali su candele vecchie. Ignorali.
 - Il filtro notizie dipende da un calendario che aggiorni tu e non copre le notizie impreviste (vedi sezione dedicata).
-- Non segue le operazioni: non controlla stop e target e non ti avvisa del TP1 o della chiusura serale.
+- Non segue le tue operazioni reali: non ti avvisa del TP1 o della chiusura serale. Il registro dei segnali segue solo una posizione **teorica** per misurare le strategie.
 - Il limite "max 4% totale" nel messaggio di avvio è solo un promemoria.
 
 ---
@@ -242,7 +268,7 @@ Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine s
 
 1. Vai su [github.com](https://github.com) → **New repository**
 2. Dagli un nome (es. `trading-bot`) → **Create repository**
-3. Carica tutti i file: `main.py`, `strategies.py`, `notifier.py`, `news_filter.py`, `stato.py`, `backtest.py`, `requirements.txt`, `Procfile`, `railway.toml`
+3. Carica tutti i file: `main.py`, `strategies.py`, `notifier.py`, `news_filter.py`, `stato.py`, `registro.py`, `backtest.py`, `verifica_backtest.py`, `requirements.txt`, `Procfile`, `railway.toml`
 4. Clicca **Commit changes**
 
 ### STEP 2 — Crea account Railway

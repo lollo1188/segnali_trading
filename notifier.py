@@ -24,6 +24,11 @@ def _send(text: str) -> bool:
     except Exception as e:
         logger.error(f"Telegram error: {e}"); return False
 
+def send_testo(text: str) -> bool:
+    """Messaggio libero (avvisi, resoconti). Testo già in HTML di Telegram."""
+    return _send(text)
+
+
 def _blocco_slittamento(signal: dict) -> str:
     """Confronta il prezzo attuale con l'entry del segnale ed evidenzia lo slittamento.
     Serve 'prezzo_attuale' nel segnale; se manca, il blocco viene omesso."""
