@@ -36,7 +36,7 @@ Stessa logica dell'ORB S&P500 (breakout della candela delle 15:30 con VWAP, EMA2
 - Il segnale parte solo se la candela è di oggi e chiusa da meno di 25 minuti (evita dati vecchi in giorni festivi o mezze sedute).
 - Gli stop massimi in percentuale sono valori **arbitrari**, non ottimizzati.
 - Tutti i parametri sono **non validati**: usa solo demo o rischio minimo.
-- **Evita i giorni dei risultati trimestrali**: il bot non conosce le date degli utili e quei giorni hanno gap e volatilità anomali.
+- **Giorni dei risultati trimestrali**: il bot li salta in automatico solo se la data è in `UTILI` di `news_filter.py` (oggi AVGO 10/12/2026 e CAT 28/1/2027; ANT non ancora). Quei giorni hanno gap e volatilità anomali: aggiorna il calendario a ogni trimestre.
 - ANT e AVGO sono entrambi legati al tema AI e AVGO si muove spesso con il Nasdaq: più segnali nella stessa direzione non sono indipendenti.
 - Non è verificato che Revolut offra i CFD su ANT, CAT e AVGO: controlla nell'app.
 
@@ -208,7 +208,7 @@ Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine s
 
 **Limiti da tenere presenti:**
 - Per i dati a 15 minuti Yahoo Finance fornisce solo circa 60 giorni: l'ORB viene testato su poche decine di trade, troppo poche per un PF affidabile.
-- Il backtest non include le strategie VWAP Reversal, London Sweep e Kumo Rider: **i PF indicati nei commenti del codice non sono verificati da nessuno script del repository**.
+- Il backtest non include le strategie VWAP Reversal, London Sweep e Kumo Rider: **non hanno un PF verificato**. I valori scritti in passato nel codice e nel messaggio di avvio (1.84, 1.55, 1.40, 1.62, 1.51) sono stati tolti perché nessuno script li confermava.
 - Il backtest simula un solo trade al giorno e non gestisce il TP1 con break-even.
 - Nelle varianti ORB S&P500 il filtro sull'ampiezza dell'opening range usa l'ATR dell'intera giornata, quindi anche candele future (lookahead). Il backtest `azioni` non ha questo difetto.
 - Nessun backtest include il filtro notizie.
