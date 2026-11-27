@@ -151,3 +151,44 @@ def test_nessun_avviso_per_strumenti_non_scaricati(bot, inviati):
                                    "errore": "", "ultima_candela": ora - timedelta(days=3)}
     bot["job_salute_dati"]()
     assert inviati == []
+
+
+def test_solo_registro(bot, inviati, monkeypatch, tmp_path):
+    """STRATEGIE_OMBRA: il segnale non va su Telegram, finisce nel registro come 'ombra',
+    non conta nel rischio totale e nel resoconto è segnato 'solo registro'."""
+    import registro
+    monkeypatch.setenv("STATO_PATH", str(tmp_path / "stato.json"))
+    monkeypatch.setattr(registro, "_registro", None)
+    monkeypatch.setitem(bot, "registro", registro)
+    monkeypatch.setitem(bot, "STRATEGIE_OMBRA", {"orb_cat"})
+    monkeypatch.setitem(bot, "last_signals", {})
+    telegram = []
+    monkeypatch.setitem(bot, "send_telegram", lambda s: telegram.append(s) or True)
+    R = bot["ROME_TZ"]
+    fine = datetime.now(R).replace(second=0, microsecond=0)
+    sig = {"direzione": "LONG", "entry": "100.00", "sl": "99.00", "tp": "102.50",
+           "strategia": "🟢 ORB CAT", "asset": "CAT", "timeframe": "15min", "rr": "1:2.5",
+           "candela_fine": fine}
+    bot["run_check"]("orb_cat", lambda: dict(sig), 8)
+    bot["run_check"]("orb_cat", lambda: dict(sig), 8)            # pausa: non registra due volte
+    assert telegram == []
+    recs = registro._tutti()
+    assert len(recs) == 1 and recs[0]["strategia"] == "orb_cat" and recs[0]["ombra"] is True
+    monkeypatch.setitem(bot, "posizioni_pb", {})
+    assert bot["blocco_rischio"]("orb_sp500", "LONG") == ""     # l'ombra non è una posizione vera
+    assert "ORB CAT 👻 <i>solo registro</i>" in registro.riepilogo(7)
+
+
+def test_ombra_vince_su_spente(monkeypatch):
+    """Una strategia sia in STRATEGIE_SPENTE sia in STRATEGIE_OMBRA gira in solo registro;
+    il ritracciamento non è ammesso in ombra."""
+    import os
+    monkeypatch.setenv("STRATEGIE_SPENTE", "orb_ant,orb_cat,orb_avgo,pullback_avgo")
+    monkeypatch.setenv("STRATEGIE_OMBRA", "orb_cat,orb_avgo,pullback_avgo")
+    monkeypatch.setenv("PORT", str(__import__("conftest")._porta_libera()))
+    radice = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(radice, "main.py"), encoding="utf-8").read().split("# ── Main ──")[0]
+    ns = {"__name__": "main_test2"}
+    exec(compile(src, "main.py", "exec"), ns)
+    assert ns["STRATEGIE_OMBRA"] == {"orb_cat", "orb_avgo"}
+    assert ns["STRATEGIE_SPENTE"] == {"orb_ant", "pullback_avgo"}

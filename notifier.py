@@ -225,9 +225,11 @@ def send_pullback(m: dict) -> bool:
     return _send(msg)
 
 
-def send_startup_message(spente=None, nota_stato=""):
+def send_startup_message(spente=None, nota_stato="", ombra=None):
     now = datetime.now(ROME_TZ).strftime("%d/%m/%Y %H:%M")
     riga_spente = f"⏸ <b>Spente:</b> {', '.join(spente)}\n" if spente else ""
+    riga_spente += (f"👻 <b>Solo registro</b> (nessun segnale, solo nel resoconto): {', '.join(ombra)}\n"
+                    if ombra else "")
     riga_stato = f"{nota_stato}\n" if nota_stato else ""
     msg = (
         f"🤖 <b>Trading Bot — Avviato</b>\n"

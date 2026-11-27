@@ -118,6 +118,7 @@ Il risultato è in **R** (multipli del rischio: +2,5R = target dell'ORB, −1R =
 
 - È un esito **teorico**: non sa se hai aperto il CFD né a che prezzo. Non simula TP1, break-even e trailing (come il backtest).
 - Il ritracciamento giornaliero (9, 10) non è incluso: ha già i suoi promemoria serali.
+- **Modalità "solo registro"**: le strategie elencate nella variabile `STRATEGIE_OMBRA` (es. `orb_cat,orb_avgo`) girano normalmente ma **non mandano segnali su Telegram**. Finiscono solo nel registro e nel resoconto, segnate 👻 *solo registro*, e non contano nel rischio totale. Serve a misurare una strategia senza riceverla. Vince su `STRATEGIE_SPENTE`, quindi può restare anche lì. Non vale per il ritracciamento giornaliero.
 - Con meno di circa 30 segnali per strategia non trarre conclusioni.
 
 ---
@@ -322,6 +323,7 @@ Variabili **opzionali** (strategie su azioni):
 - `ANT_ABILITA_SHORT`, `CAT_ABILITA_SHORT`, `AVGO_ABILITA_SHORT` = `1` o `0` (default: ANT `0`, CAT e AVGO `1`)
 - `TICKER_ANT`, `TICKER_CAT`, `TICKER_AVGO` = simbolo Yahoo Finance, se diverso da quello predefinito
 - `RISCHIO_PER_TRADE`, `MAX_RISCHIO_TOTALE` = rischio per segnale e limite totale in % del capitale, usati per il calcolo "Già aperti" nei messaggi (default 1,5 e 4)
+- `STRATEGIE_OMBRA` = strategie in modalità **solo registro** (es. `orb_cat,orb_avgo`): girano e finiscono nel resoconto del sabato, ma non mandano segnali. Il messaggio di avvio le elenca con 👻
 - `STRATEGIE_SPENTE` = elenco di strategie da **spegnere**, separate da virgole (es. `orb_cat,orb_avgo`). Nomi validi: `vwap_gold`, `london_sweep`, `orb_sp500`, `orb_ant`, `orb_cat`, `orb_avgo`, `kumo_gold_4h`, `kumo_nasdaq`, `pullback_sp500`, `pullback_avgo`. Variabile assente o vuota = tutte attive. Per riaccenderle togli il nome: Railway riavvia il bot da solo. Il messaggio di avvio su Telegram mostra quali sono spente.
 
 Railway riavvia il bot da solo.
