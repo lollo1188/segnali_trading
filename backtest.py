@@ -20,7 +20,7 @@ warnings.filterwarnings("ignore")
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, time
+from datetime import time
 import pytz
 
 ROME_TZ = pytz.timezone("Europe/Rome")
@@ -946,7 +946,7 @@ def _trades_pullback(df, rsi_soglia=10, usa_filtro_trend=True, atr_stop=3.0, max
     d["atr"] = atr_calc(d, 14)
     d.dropna(inplace=True)
 
-    O, H, L, C = d["Open"].values, d["High"].values, d["Low"].values, d["Close"].values
+    O, L, C = d["Open"].values, d["Low"].values, d["Close"].values
     S5, S200, R2, A = d["sma5"].values, d["sma200"].values, d["rsi2"].values, d["atr"].values
     dates = d.index
     n = len(d)
