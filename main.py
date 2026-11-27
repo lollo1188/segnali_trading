@@ -1,9 +1,11 @@
-import os, logging, threading, time as time_module
+import os, sys, logging, threading, time as time_module
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime, time, timedelta
 import pytz
 
-logging.basicConfig(level=logging.INFO,
+# Log su stdout: Railway marca come "error" tutto ciò che arriva da stderr, e così
+# anche i messaggi normali sembravano errori. Il livello resta nel testo ([INFO], [ERROR]).
+logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -11,9 +13,24 @@ ROME_TZ = pytz.timezone("Europe/Rome")
 
 
 # ── Health server — avvia PRIMA di qualsiasi import pesante ──────────────────
+# Risponde 503 se lo scheduler non dà segni di vita da più di MAX_SILENZIO_MIN minuti
+# (battito aggiornato da un job ogni 5 minuti). Il ciclo principale, nello stesso caso,
+# chiude il processo e Railway lo riavvia (restartPolicyType = "always").
+ULTIMO_BATTITO = None
+MAX_SILENZIO_MIN = 20
+
+
+def scheduler_vivo() -> bool:
+    if ULTIMO_BATTITO is None:          # appena avviato: il primo battito arriva a breve
+        return True
+    return (datetime.now(ROME_TZ) - ULTIMO_BATTITO) < timedelta(minutes=MAX_SILENZIO_MIN)
+
+
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        self.send_response(200); self.end_headers(); self.wfile.write(b"OK")
+        ok = scheduler_vivo()
+        self.send_response(200 if ok else 503); self.end_headers()
+        self.wfile.write(b"OK" if ok else b"SCHEDULER FERMO")
 
     def log_message(self, format, *args): pass
 
@@ -44,7 +61,7 @@ try:
         check_vwap_reversal_gold, check_london_sweep_gold,
         check_orb_sp500, check_kumo_gold_4h, check_kumo_nasdaq_1h,
         check_orb_ant, check_orb_cat, check_orb_avgo, analizza_pullback,
-        get_last_price, fmt, in_orario_et, ET_TZ, TICKER_GOLD, TICKER_SP500, TICKER_NASDAQ,
+        get_last_price, get_data, fmt, in_orario_et, ET_TZ, SALUTE_DATI, TICKER_GOLD, TICKER_SP500, TICKER_NASDAQ,
         TICKER_ANT, TICKER_CAT, TICKER_AVGO,
     )
     logger.info("Strategies importate OK")
@@ -52,19 +69,20 @@ except Exception as e:
     logger.error(f"Errore import strategies: {e}")
 
 try:
-    from notifier import send_telegram, send_startup_message, send_pullback
+    from notifier import send_telegram, send_startup_message, send_pullback, send_testo
     logger.info("Notifier importato OK")
 except Exception as e:
     logger.error(f"Errore import notifier: {e}")
 
 try:
-    from news_filter import is_news_window, prossimo_sblocco, motivo_blocco
+    from news_filter import is_news_window, prossimo_sblocco, motivo_blocco, fine_calendario
     logger.info("News filter importato OK")
 except Exception as e:
     logger.error(f"Errore import news_filter: {e}")
     def is_news_window(name=None): return False
     def prossimo_sblocco(name=None): return None
     def motivo_blocco(name=None): return None
+    def fine_calendario(): return None
 
 
 try:
@@ -75,17 +93,25 @@ try:
 except Exception as e:
     logger.error(f"Errore import stato: {e}")
     stato = None
-    _STATO = {"last_signals": {}, "posizioni_pb": {}, "ultimo_pb": {}}
+    _STATO = {"last_signals": {}, "posizioni_pb": {}, "ultimo_pb": {}, "avvisi": {}}
+
+try:
+    import registro
+    logger.info(f"Registro segnali in {registro.percorso()}")
+except Exception as e:
+    logger.error(f"Errore import registro: {e}")
+    registro = None
 
 
 # ── Logica bot ────────────────────────────────────────────────────────────────
 # Memoria del bot: caricata dal file di stato e salvata a ogni modifica.
 last_signals: dict = _STATO["last_signals"]
+avvisi: dict = _STATO.get("avvisi", {})       # quando sono stati inviati gli avvisi periodici
 
 
 def salva_stato():
     if stato is not None:
-        stato.salva(last_signals, posizioni_pb, ultimo_pb)
+        stato.salva(last_signals, posizioni_pb, ultimo_pb, avvisi)
 
 # Ticker da cui leggere il prezzo attuale per ogni strategia (slittamento)
 SIGNAL_TICKER = {
@@ -156,6 +182,28 @@ def _pianifica_ripetizione(name, fn, cooldown_h):
         logger.warning(f"[{name}] Ripetizione non pianificata: {type(e).__name__}")
 
 
+# Errori consecutivi per strategia: al terzo di fila avviso su Telegram (una volta),
+# e avviso di nuovo quando torna a funzionare.
+ERRORI_DI_FILA = 3
+errori_job: dict = {}
+job_in_errore: set = set()
+
+
+def _esito_job(name, errore=None):
+    if errore is None:
+        errori_job[name] = 0
+        if name in job_in_errore:
+            job_in_errore.discard(name)
+            send_testo(f"✅ <b>{name}</b>: di nuovo funzionante")
+        return
+    errori_job[name] = errori_job.get(name, 0) + 1
+    if errori_job[name] >= ERRORI_DI_FILA and name not in job_in_errore:
+        job_in_errore.add(name)
+        send_testo(f"🚨 <b>{name}</b>: {errori_job[name]} controlli di fila in errore.\n"
+                   f"Ultimo errore: <code>{str(errore)[:200]}</code>\n"
+                   f"I segnali di questa strategia potrebbero non arrivare: guarda i log su Railway.")
+
+
 def run_check(name, fn, cooldown_h=4):
     if name in STRATEGIE_SPENTE:
         return
@@ -177,10 +225,14 @@ def run_check(name, fn, cooldown_h=4):
             if send_telegram(signal):
                 logger.info(f"[{name}] Segnale inviato: {signal['direzione']}")
                 register(name, signal["direzione"])
+                if registro is not None:
+                    registro.registra(name, SIGNAL_TICKER.get(name, ""), signal)
             else:
                 logger.error(f"[{name}] Invio Telegram fallito")
+        _esito_job(name)
     except Exception as e:
         logger.error(f"[{name}] Errore: {e}")
+        _esito_job(name, f"{type(e).__name__}: {e}")
 
 
 def job_vwap_gold():
@@ -272,9 +324,89 @@ def job_kumo_gold_4h():
 
 
 def job_kumo_nasdaq():
-    if not in_orario_et(time(9, 30), time(15, 0)): return       # 15:30–21:00 italiane
+    # Gira ai :32 (le candele orarie del Nasdaq si chiudono alle :30 di New York).
+    # Fino alle 15:35 ET così valuta anche la candela 14:30–15:30.
+    if not in_orario_et(time(9, 30), time(15, 35)): return      # 15:30–21:35 italiane
     logger.info("▶ Kumo Rider Nasdaq 1H")
     run_check("kumo_nasdaq", check_kumo_nasdaq_1h, 8)
+
+
+# ── Registro segnali e resoconto settimanale ──────────────────────────────────
+def job_valuta_registro():
+    if registro is None:
+        return
+    try:
+        chiusi = registro.valuta(get_data)
+        if chiusi:
+            logger.info(f"[registro] {len(chiusi)} posizioni teoriche chiuse")
+    except Exception as e:
+        logger.error(f"[registro] Errore valutazione: {type(e).__name__}: {e}")
+
+
+def job_resoconto():
+    if registro is None:
+        return
+    job_valuta_registro()
+    try:
+        if send_testo(registro.riepilogo(7)):
+            logger.info("[registro] Resoconto settimanale inviato")
+    except Exception as e:
+        logger.error(f"[registro] Errore resoconto: {type(e).__name__}: {e}")
+
+
+# ── Avvisi: dati Yahoo, calendario, battito ───────────────────────────────────
+DATI_FALLITI_DI_FILA = 3
+DATI_SILENZIO_MIN = 45
+ticker_in_errore: set = set()
+
+
+def job_salute_dati():
+    """Avvisa se un ticker non scarica dati da un po' (e quando torna a funzionare)."""
+    now = datetime.now(ROME_TZ)
+    for ticker, s in list(SALUTE_DATI.items()):
+        fermo = s["fallimenti"] >= DATI_FALLITI_DI_FILA and (
+            s["ultimo_ok"] is None or now - s["ultimo_ok"] > timedelta(minutes=DATI_SILENZIO_MIN))
+        if fermo and ticker not in ticker_in_errore:
+            ticker_in_errore.add(ticker)
+            quando = f"dalle {s['ultimo_ok']:%H:%M}" if s["ultimo_ok"] else "dall'avvio"
+            send_testo(f"🚨 <b>Dati Yahoo non disponibili</b> per <code>{ticker}</code> {quando} "
+                       f"({s['fallimenti']} tentativi falliti).\nUltimo errore: <code>{s['errore']}</code>\n"
+                       f"Le strategie su questo strumento non possono dare segnali.")
+        elif s["fallimenti"] == 0 and ticker in ticker_in_errore:
+            ticker_in_errore.discard(ticker)
+            send_testo(f"✅ Dati Yahoo di nuovo disponibili per <code>{ticker}</code>")
+
+
+GIORNI_AVVISO_CALENDARIO = 60
+
+
+def job_calendario():
+    """Avvisa (al massimo una volta a settimana) quando il calendario notizie sta finendo."""
+    try:
+        fine = fine_calendario()
+        if fine is None:
+            return
+        oggi = datetime.now(ROME_TZ).date()
+        giorni = (fine - oggi).days
+        if giorni > GIORNI_AVVISO_CALENDARIO:
+            return
+        ultimo = avvisi.get("calendario")
+        if ultimo is not None and (oggi - ultimo).days < 7:
+            return
+        testo = (f"📅 <b>Calendario notizie in scadenza</b>: copre fino al {fine:%d/%m/%Y} "
+                 + (f"(tra {giorni} giorni)." if giorni >= 0 else f"(scaduto da {-giorni} giorni!)."))
+        testo += ("\nAggiungi NFP, CPI, FOMC e chiusure di Wall Street in <code>news_filter.py</code>: "
+                  "dopo quella data il filtro non blocca più le notizie.")
+        if send_testo(testo):
+            avvisi["calendario"] = oggi
+            salva_stato()
+    except Exception as e:
+        logger.error(f"[calendario] Errore: {type(e).__name__}: {e}")
+
+
+def job_battito():
+    global ULTIMO_BATTITO
+    ULTIMO_BATTITO = datetime.now(ROME_TZ)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -283,7 +415,10 @@ logger.info(f" TRADING BOT — {len(NOMI_STRATEGIE) - len(STRATEGIE_SPENTE)} str
 logger.info("═══════════════════════════════════════")
 
 try:
-    scheduler = BackgroundScheduler(timezone=ROME_TZ)
+    # misfire_grace_time: un job partito con qualche secondo di ritardo (thread occupati)
+    # viene eseguito lo stesso invece di essere saltato; coalesce evita esecuzioni doppie.
+    scheduler = BackgroundScheduler(timezone=ROME_TZ,
+                                    job_defaults={"misfire_grace_time": 120, "coalesce": True})
     scheduler.add_listener(lambda e: logger.error(f"Job error: {e.exception}"), EVENT_JOB_ERROR)
     def _aggiungi_job(funzione, nome, trigger, **kwargs):
         if nome in STRATEGIE_SPENTE:
@@ -291,17 +426,22 @@ try:
             return
         scheduler.add_job(funzione, trigger, id=nome, **kwargs)
 
-    _aggiungi_job(job_vwap_gold, "vwap_gold", "interval", minutes=15)
-    _aggiungi_job(job_london_sweep, "london_sweep", "interval", minutes=15)
-    _aggiungi_job(job_orb_sp500, "orb_sp500", "interval", minutes=15)
-    _aggiungi_job(job_orb_ant, "orb_ant", "interval", minutes=15)
-    _aggiungi_job(job_orb_cat, "orb_cat", "interval", minutes=15)
-    _aggiungi_job(job_orb_avgo, "orb_avgo", "interval", minutes=15)
-    # Ogni ora ai :20: le candele 4H sono allineate in UTC, quindi in ora italiana si
+    # Controlli 2 minuti dopo la chiusura di ogni candela da 15 minuti (:02, :17, :32, :47):
+    # il segnale arriva subito, non fino a 15 minuti dopo come con un intervallo libero.
+    # I 2 minuti lasciano a Yahoo il tempo di pubblicare la candela chiusa.
+    QUARTI = "2,17,32,47"
+    _aggiungi_job(job_vwap_gold, "vwap_gold", "cron", minute=QUARTI)
+    _aggiungi_job(job_london_sweep, "london_sweep", "cron", minute=QUARTI)
+    _aggiungi_job(job_orb_sp500, "orb_sp500", "cron", minute=QUARTI)
+    _aggiungi_job(job_orb_ant, "orb_ant", "cron", minute=QUARTI)
+    _aggiungi_job(job_orb_cat, "orb_cat", "cron", minute=QUARTI)
+    _aggiungi_job(job_orb_avgo, "orb_avgo", "cron", minute=QUARTI)
+    # Ogni ora ai :02: le candele 4H sono allineate in UTC, quindi in ora italiana si
     # chiudono a orari diversi tra ora solare e legale. Controllando ogni ora il segnale
-    # arriva sempre ~20 minuti dopo la chiusura (la pausa di 12h evita doppioni).
-    _aggiungi_job(job_kumo_gold_4h, "kumo_gold_4h", "cron", minute=20)
-    _aggiungi_job(job_kumo_nasdaq, "kumo_nasdaq", "cron", minute=5)
+    # arriva sempre ~2 minuti dopo la chiusura (la pausa di 12h evita doppioni).
+    _aggiungi_job(job_kumo_gold_4h, "kumo_gold_4h", "cron", minute=2)
+    # Le candele orarie del Nasdaq iniziano alle :30 di New York
+    _aggiungi_job(job_kumo_nasdaq, "kumo_nasdaq", "cron", minute=32)
     # Ritracciamento giornaliero: dopo la chiusura USA, in ora di New York (16:10 e 16:40 ET,
     # di solito 22:10 e 22:40 italiane). Due controlli: se Yahoo è in ritardo il secondo recupera.
     for _ora, _min, _suf in ((16, 10, "a"), (16, 40, "b")):
@@ -310,6 +450,13 @@ try:
                 continue
             scheduler.add_job(_fn, "cron", day_of_week="mon-fri", hour=_ora, minute=_min,
                               timezone=ET_TZ, id=f"{_nome}_{_suf}")
+    # Registro, resoconto e avvisi
+    scheduler.add_job(job_valuta_registro, "cron", minute="8,38", id="registro_valuta")
+    scheduler.add_job(job_resoconto, "cron", day_of_week="sat", hour=10, minute=7, id="resoconto")
+    scheduler.add_job(job_salute_dati, "cron", minute="10,40", id="salute_dati")
+    scheduler.add_job(job_calendario, "cron", hour=9, minute=5, id="calendario")
+    scheduler.add_job(job_battito, "interval", minutes=5, id="battito",
+                      next_run_time=datetime.now(ROME_TZ))
     scheduler.start()
     logger.info("Scheduler avviato")
 except Exception as e:
@@ -332,10 +479,21 @@ try:
 except Exception as e:
     logger.error(f"Errore startup message: {e}")
 
+try:
+    job_calendario()          # avviso subito se il calendario è già in scadenza
+except Exception as e:
+    logger.error(f"Errore controllo calendario: {e}")
+
 logger.info("Bot in ascolto...")
 while True:
     try:
         time_module.sleep(60)
+        if not scheduler_vivo():
+            logger.error(f"Scheduler fermo da oltre {MAX_SILENZIO_MIN} minuti: riavvio il processo")
+            try:
+                send_testo("🔄 <b>Bot bloccato</b>: lo scheduler non risponde, riavvio automatico in corso.")
+            finally:
+                os._exit(1)       # Railway riavvia il servizio (restartPolicyType = "always")
     except Exception as e:
         logger.error(f"Loop error: {e}")
         time_module.sleep(10)

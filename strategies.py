@@ -4,7 +4,7 @@ STRATEGIE DI TRADING
 2. London Liquidity Sweep Oro — intraday (backtest 60 giorni: PF 0,69 su 8 trade)
 3. ORB S&P500 15min — intraday (backtest 60 giorni: PF ≈1,00, nessun vantaggio)
 4. Kumo Rider Oro 4H — swing overnight OK (backtest 2 anni: PF 0,83 su 10 trade)
-5. Kumo Rider Nasdaq 1H — swing overnight OK (backtest 2 anni: 4 trade, tutti in perdita)
+5. Kumo Rider Nasdaq 1H — swing overnight OK (backtest 2 anni: 5 trade, tutti in perdita)
 6. ORB Anthropic ANT 15min — intraday (SPERIMENTALE: storico troppo breve per un backtest)
 7. ORB Caterpillar CAT 15min — intraday (non validata: usa backtest.py azioni)
 8. ORB Broadcom AVGO 15min — intraday (non validata: usa backtest.py azioni)
@@ -77,6 +77,20 @@ def _vwap_giornaliero_et(df: pd.DataFrame) -> pd.Series:
 
 
 # ── Download dati ─────────────────────────────────────────────────────────────
+# Salute dei dati: per ogni ticker, download falliti di fila e ultimo download riuscito.
+# main.py la controlla e avvisa su Telegram se Yahoo non risponde.
+SALUTE_DATI: dict = {}
+
+
+def _segna_download(ticker: str, ok: bool, errore: str = "") -> None:
+    s = SALUTE_DATI.setdefault(ticker, {"fallimenti": 0, "ultimo_ok": None, "errore": ""})
+    if ok:
+        s["fallimenti"] = 0
+        s["ultimo_ok"] = datetime.now(ROME_TZ)
+    else:
+        s["fallimenti"] += 1
+        s["errore"] = errore
+
 
 def get_data(ticker: str, period: str, interval: str) -> Optional[pd.DataFrame]:
     try:
@@ -84,13 +98,16 @@ def get_data(ticker: str, period: str, interval: str) -> Optional[pd.DataFrame]:
         df = t.history(period=period, interval=interval, auto_adjust=True)
         if df is None or len(df) < 30:
             logger.warning(f"Dati insufficienti per {ticker}")
+            _segna_download(ticker, False, "dati insufficienti")
             return None
         if df.index.tz is None:
             df.index = df.index.tz_localize("UTC")
         df.index = df.index.tz_convert(ROME_TZ)
+        _segna_download(ticker, True)
         return df.dropna()
     except Exception as e:
         logger.error(f"Errore download {ticker}: {e}")
+        _segna_download(ticker, False, f"{type(e).__name__}: {e}"[:200])
         return None
 
 
@@ -173,6 +190,11 @@ def fmt(value, decimals: int = 2) -> str:
         return str(value)
 
 
+def chiusura_candela(ts, minutes: int) -> datetime:
+    """Orario di chiusura della candela (per il registro dei segnali)."""
+    return (ts + pd.Timedelta(minutes=minutes)).tz_convert(ROME_TZ).to_pydatetime()
+
+
 def candle_label(ts, minutes: int) -> str:
     """Orario CET della candela su cui si basa il segnale, es. '16:15–16:30 CET'.
     ts = timestamp di APERTURA della candela (curr.name), minutes = durata."""
@@ -229,6 +251,7 @@ def check_vwap_reversal_gold() -> Optional[dict]:
             "tp": fmt(tp),
             "rr": "~1.8:1",
             "candela": candle_label(curr.name, 15),
+            "candela_fine": chiusura_candela(curr.name, 15),
             "note": f"Prezzo sotto VWAP -2σ | RSI {curr['rsi14']:.0f} | Rimbalzo iniziato | Chiudi entro 21:45"
         }
 
@@ -250,6 +273,7 @@ def check_vwap_reversal_gold() -> Optional[dict]:
             "tp": fmt(tp),
             "rr": "~1.8:1",
             "candela": candle_label(curr.name, 15),
+            "candela_fine": chiusura_candela(curr.name, 15),
             "note": f"Prezzo sopra VWAP +2σ | RSI {curr['rsi14']:.0f} | Inversione | Chiudi entro 21:45"
         }
 
@@ -328,6 +352,7 @@ def check_london_sweep_gold() -> Optional[dict]:
         "tp": fmt(tp),
         "rr": f"1:{(tp-entry)/risk:.1f}",
         "candela": candle_label(curr.name, 15),
+        "candela_fine": chiusura_candela(curr.name, 15),
         "note": f"Sweep ${sweep_depth:.2f} sotto range asiatico | Reclaim | TP1=50% a {fmt(tp)} | Trailing $4 dopo TP1"
     }
 
@@ -399,6 +424,7 @@ def check_orb_sp500() -> Optional[dict]:
             "tp": fmt(tp2),
             "rr": "1:2.5",
             "candela": candle_label(curr.name, 15),
+            "candela_fine": chiusura_candela(curr.name, 15),
             "tp1": fmt(tp1),
             "chiudi_entro": chiudi,
             "note": f"Breakout OR high {fmt(or_high)} | Sopra VWAP | TP1 {fmt(tp1)} → sposta SL a BE | Chiudi entro {chiudi}"
@@ -425,6 +451,7 @@ def check_orb_sp500() -> Optional[dict]:
             "tp": fmt(tp2),
             "rr": "1:2.5",
             "candela": candle_label(curr.name, 15),
+            "candela_fine": chiusura_candela(curr.name, 15),
             "tp1": fmt(tp1),
             "chiudi_entro": chiudi,
             "note": f"Breakout sotto OR low {fmt(or_low)} | Sotto VWAP | TP1 {fmt(tp1)} → sposta SL a BE | Chiudi entro {chiudi}"
@@ -494,6 +521,7 @@ def check_kumo_gold_4h() -> Optional[dict]:
             "tp": fmt(entry + 2.0 * risk),
             "rr": "1:2",
             "candela": candle_label(curr.name, 240),
+            "candela_fine": chiusura_candela(curr.name, 240),
             "note": f"Tenkan cross Kijun | Sopra nuvola | RSI {curr['rsi14']:.0f} | ⚠️ Overnight OK se R:R ≥ 1.5 già raggiunto"
         }
 
@@ -516,6 +544,7 @@ def check_kumo_gold_4h() -> Optional[dict]:
             "tp": fmt(entry - 2.0 * risk),
             "rr": "1:2",
             "candela": candle_label(curr.name, 240),
+            "candela_fine": chiusura_candela(curr.name, 240),
             "note": f"Tenkan cross Kijun al ribasso | Sotto nuvola | RSI {curr['rsi14']:.0f} | ⚠️ Overnight OK se R:R ≥ 1.5"
         }
 
@@ -523,7 +552,7 @@ def check_kumo_gold_4h() -> Optional[dict]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STRATEGIA 5 — KUMO RIDER NASDAQ 1H (backtest: 4 trade, tutti in perdita)
+# STRATEGIA 5 — KUMO RIDER NASDAQ 1H (backtest: 5 trade, tutti in perdita)
 # Swing — overnight OK se segnale forte
 # Ichimoku 9/26/52 + RSI 40-65 + filtro orario 09:30-15:00 ET (15:30-21:00 italiane)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -581,6 +610,7 @@ def check_kumo_nasdaq_1h() -> Optional[dict]:
             "tp": fmt(entry + 2.0 * risk),
             "rr": "1:2",
             "candela": candle_label(curr.name, 60),
+            "candela_fine": chiusura_candela(curr.name, 60),
             "note": f"Tenkan cross Kijun | Sopra nuvola | RSI {curr['rsi14']:.0f} | ⚠️ Overnight OK se R:R ≥ 1.5"
         }
 
@@ -602,6 +632,7 @@ def check_kumo_nasdaq_1h() -> Optional[dict]:
             "tp": fmt(entry - 2.0 * risk),
             "rr": "1:2",
             "candela": candle_label(curr.name, 60),
+            "candela_fine": chiusura_candela(curr.name, 60),
             "note": f"Tenkan cross Kijun al ribasso | Sotto nuvola | RSI {curr['rsi14']:.0f} | ⚠️ Overnight OK se R:R ≥ 1.5"
         }
 
@@ -703,6 +734,7 @@ def _check_orb_azione(ticker: str, nome: str, asset: str, short_ok: bool,
             "tp": fmt(tp2),
             "rr": "1:2.5",
             "candela": candle_label(curr.name, 15),
+            "candela_fine": chiusura_candela(curr.name, 15),
             "tp1": fmt(tp1),
             "chiudi_entro": chiudi,
             "note": f"Breakout OR high {fmt(or_high)} | Sopra VWAP | TP1 {fmt(tp1)} → sposta SL a BE | "
@@ -731,6 +763,7 @@ def _check_orb_azione(ticker: str, nome: str, asset: str, short_ok: bool,
             "tp": fmt(tp2),
             "rr": "1:2.5",
             "candela": candle_label(curr.name, 15),
+            "candela_fine": chiusura_candela(curr.name, 15),
             "tp1": fmt(tp1),
             "chiudi_entro": chiudi,
             "note": f"Breakout sotto OR low {fmt(or_low)} | Sotto VWAP | TP1 {fmt(tp1)} → sposta SL a BE | "

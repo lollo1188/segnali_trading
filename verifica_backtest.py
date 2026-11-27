@@ -110,21 +110,21 @@ def confronta(nome, live, back):
 
 
 t0 = T.time()
-# 1) VWAP Reversal Oro: ogni 15 minuti (scostamento 5'), dati "5d"
+# 1) VWAP Reversal Oro: ai :02, :17, :32, :47 (come main.py), dati "5d"
 g15 = dati("GC=F", "60d", "15m")
-live = replay("vwap", st.check_vwap_reversal_gold, g15, orari_ogni(g15, 15, 5), 4, max_righe=480)
+live = replay("vwap", st.check_vwap_reversal_gold, g15, orari_ogni(g15, 15, 2), 4, max_righe=480)
 confronta("VWAP REVERSAL ORO", live, backtest_segnali(bt.backtest_vwap_reversal_oro, "GC=F", "60d", "15m"))
 print(f"   ({T.time()-t0:.0f}s)")
 
 # 2) London Sweep: ogni 15 minuti tra 08:00 e 10:00 italiane
-live = replay("london", st.check_london_sweep_gold, g15, orari_ogni(g15, 15, 5), 12,
+live = replay("london", st.check_london_sweep_gold, g15, orari_ogni(g15, 15, 2), 12,
               finestra_job=lambda n: time(8, 0) <= n.time() <= time(10, 0), max_righe=300)
 confronta("LONDON SWEEP ORO", live, backtest_segnali(bt.backtest_london_sweep_oro, "GC=F", "60d", "15m"))
 print(f"   ({T.time()-t0:.0f}s)")
 
-# 3) Kumo Oro 4H: cron alle 0,4,8,12,16,20 e 20 minuti, dati orari "2y"
+# 3) Kumo Oro 4H: ogni ora ai :02 (come main.py), dati orari "2y"
 g1h = dati("GC=F", "2y", "1h")
-live = replay("kumo_oro", st.check_kumo_gold_4h, g1h, orari_ogni(g1h, 60, 20), 12)
+live = replay("kumo_oro", st.check_kumo_gold_4h, g1h, orari_ogni(g1h, 60, 2), 12)
 back = backtest_segnali(bt.backtest_kumo_oro_4h, "GC=F", "2y", "1h")
 # Confronto per direzione e prezzo (l'orario registrato dal replay è l'ultima candela ORARIA)
 Lk = {(d, round(e, 2)): now for _, d, e, now in live}
@@ -138,9 +138,9 @@ for k in sorted(comuni, key=lambda k: Bk[k]):
     print(f"   candela {Bk[k]:%d/%m/%Y %H:%M} {k[0]:5} {k[1]:.2f} → inviato {ritardo:.0f} min dopo la chiusura")
 print(f"   ({T.time()-t0:.0f}s)")
 
-# 4) Kumo Nasdaq 1H: cron ai :05 di ogni ora, finestra 09:30–15:00 di New York
+# 4) Kumo Nasdaq 1H: ai :32 di ogni ora, finestra 09:30–15:35 di New York (come main.py)
 n1h = dati("^NDX", "2y", "1h")
-live = replay("kumo_ndx", st.check_kumo_nasdaq_1h, n1h, orari_ogni(n1h, 60, 5), 8,
-              finestra_job=lambda n: time(9, 30) <= n.astimezone(ET).time() <= time(15, 0))
+live = replay("kumo_ndx", st.check_kumo_nasdaq_1h, n1h, orari_ogni(n1h, 60, 32), 8,
+              finestra_job=lambda n: time(9, 30) <= n.astimezone(ET).time() <= time(15, 35))
 confronta("KUMO RIDER NASDAQ 1H", live, backtest_segnali(bt.backtest_kumo_nasdaq_1h, "^NDX", "2y", "1h"))
 print(f"   ({T.time()-t0:.0f}s)")

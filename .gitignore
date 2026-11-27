@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 stato.json
 stato.json.tmp
+registro.json
+registro.json.tmp

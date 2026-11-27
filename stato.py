@@ -5,6 +5,7 @@ Salva in un file JSON:
  - ultimi segnali inviati (per la pausa anti-doppioni tra segnali uguali)
  - posizioni TEORICHE del ritracciamento giornaliero (per i promemoria MANTIENI/ESCI/STOP)
  - data dell'ultima candela giornaliera già elaborata
+ - quando sono stati inviati gli avvisi periodici (es. calendario notizie in scadenza)
 
 Dove salva:
  - variabile STATO_PATH, se impostata;
@@ -65,7 +66,7 @@ def _da_json(o: Any) -> Any:
     return o
 
 
-VUOTO = {"last_signals": {}, "posizioni_pb": {}, "ultimo_pb": {}}
+VUOTO = {"last_signals": {}, "posizioni_pb": {}, "ultimo_pb": {}, "avvisi": {}}
 
 
 def carica() -> Dict[str, dict]:
@@ -85,11 +86,42 @@ def carica() -> Dict[str, dict]:
     return {k: {} for k in VUOTO}
 
 
-def salva(last_signals: dict, posizioni_pb: dict, ultimo_pb: dict) -> bool:
+def cartella() -> str:
+    """Cartella del file di stato (lì vive anche il registro dei segnali)."""
+    return os.path.dirname(percorso()) or "."
+
+
+def scrivi_json(p: str, dati: Any) -> bool:
+    """Scrive un JSON in modo atomico (file temporaneo + rename), con date e orari."""
+    with _lock:
+        try:
+            os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
+            tmp = p + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(_a_json(dati), f, ensure_ascii=False, indent=1)
+            os.replace(tmp, p)
+            return True
+        except Exception as e:
+            logger.error(f"Salvataggio di {p} fallito: {type(e).__name__}: {e}")
+            return False
+
+
+def leggi_json(p: str, default: Any) -> Any:
+    try:
+        with open(p, encoding="utf-8") as f:
+            return _da_json(json.load(f))
+    except FileNotFoundError:
+        return default
+    except Exception as e:
+        logger.error(f"{p} illeggibile ({type(e).__name__}: {e}): si riparte da zero")
+        return default
+
+
+def salva(last_signals: dict, posizioni_pb: dict, ultimo_pb: dict, avvisi: dict = None) -> bool:
     """Scrive lo stato in modo atomico (file temporaneo + rename)."""
     p = percorso()
     dati = _a_json({"last_signals": last_signals, "posizioni_pb": posizioni_pb,
-                    "ultimo_pb": ultimo_pb})
+                    "ultimo_pb": ultimo_pb, "avvisi": avvisi or {}})
     with _lock:
         try:
             os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
