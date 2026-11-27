@@ -125,11 +125,10 @@ GIORNI_ORO_CHIUSI = {
 UTILI = {
     # Broadcom: risultati mercoledì 9/12/2026 dopo la chiusura -> reazione giovedì 10/12
     "orb_avgo": [date(2026, 12, 10)],
-    # Caterpillar: data ufficiale non ancora annunciata. Le stime indicano il 27 o il
-    # 28/1/2027 prima dell'apertura (reazione lo stesso giorno). Inserisci la data
-    # appena esce su investors.caterpillar.com.
+    # Caterpillar: risultati giovedì 28/1/2027 prima dell'apertura USA (data indicata da
+    # Revolut) -> reazione lo stesso giorno. Conferma su investors.caterpillar.com.
     # Anthropic: prima trimestrale da società quotata non ancora annunciata.
-    "orb_cat": [],
+    "orb_cat": [date(2027, 1, 28)],
     "orb_ant": [],
     # Ritracciamento giornaliero: si guarda il giorno in cui si ENTRA (apertura del giorno dopo il segnale).
     "pullback_avgo": [date(2026, 12, 10)],
