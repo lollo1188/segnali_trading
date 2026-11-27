@@ -75,7 +75,8 @@ except Exception as e:
     logger.error(f"Errore import notifier: {e}")
 
 try:
-    from news_filter import is_news_window, prossimo_sblocco, motivo_blocco, fine_calendario
+    from news_filter import (is_news_window, prossimo_sblocco, motivo_blocco, fine_calendario,
+                             minuti_di_mercato)
     logger.info("News filter importato OK")
 except Exception as e:
     logger.error(f"Errore import news_filter: {e}")
@@ -83,6 +84,7 @@ except Exception as e:
     def prossimo_sblocco(name=None): return None
     def motivo_blocco(name=None): return None
     def fine_calendario(): return None
+    def minuti_di_mercato(tipo, da, a, passo_min=5): return 0
 
 
 try:
@@ -420,10 +422,47 @@ DATI_SILENZIO_MIN = 45
 ticker_in_errore: set = set()
 
 
+# Dati fermi: Yahoo risponde ma l'ultima candela non avanza. Avviso se, dalla chiusura
+# dell'ultima candela ricevuta, il mercato è rimasto aperto per più di DATI_FERMI_MIN minuti.
+DATI_FERMI_MIN = 120
+ticker_fermi: set = set()
+
+
+def tipo_mercato(ticker):
+    """'future' per i future CME (oro: GC=F), 'usa' per indici e azioni USA."""
+    return "future" if ticker.endswith("=F") else "usa"
+
+
+def _descrivi_ora(t):
+    oggi = datetime.now(ROME_TZ).date()
+    giorni = ["lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica"]
+    t = t.astimezone(ROME_TZ)
+    quando = "oggi" if t.date() == oggi else f"{giorni[t.weekday()]} {t:%d/%m}"
+    return f"{quando} alle {t:%H:%M}"
+
+
 def job_salute_dati():
-    """Avvisa se un ticker non scarica dati da un po' (e quando torna a funzionare)."""
+    """Avvisa se un ticker non scarica dati da un po', o se i dati sono fermi a mercato
+    aperto (e quando tornano a posto)."""
     now = datetime.now(ROME_TZ)
     for ticker, s in list(SALUTE_DATI.items()):
+        # ── dati fermi: solo se il ticker è stato scaricato di recente (strategia attiva)
+        ultima = s.get("ultima_candela")
+        recente = s.get("ultimo_ok") is not None and now - s["ultimo_ok"] < timedelta(minutes=45)
+        if ultima is not None and recente:
+            aperto_min = minuti_di_mercato(tipo_mercato(ticker), ultima, now)
+            ore = (now - ultima).total_seconds() / 3600
+            if aperto_min > DATI_FERMI_MIN and ticker not in ticker_fermi:
+                ticker_fermi.add(ticker)
+                send_testo(f"⏸ <b>Dati fermi</b> per <code>{ticker}</code>: ultima candela chiusa "
+                           f"{_descrivi_ora(ultima)} ({ore:.0f} ore fa), anche se il mercato dovrebbe "
+                           f"essere aperto.\nYahoo risponde ma non aggiorna: le strategie su questo "
+                           f"strumento non possono dare segnali. Può essere un orario festivo che il bot "
+                           f"non conosce o un problema di Yahoo.")
+            elif aperto_min <= DATI_FERMI_MIN and ticker in ticker_fermi:
+                ticker_fermi.discard(ticker)
+                send_testo(f"✅ Dati di nuovo aggiornati per <code>{ticker}</code>")
+        # ── download falliti
         fermo = s["fallimenti"] >= DATI_FALLITI_DI_FILA and (
             s["ultimo_ok"] is None or now - s["ultimo_ok"] > timedelta(minutes=DATI_SILENZIO_MIN))
         if fermo and ticker not in ticker_in_errore:

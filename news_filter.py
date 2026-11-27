@@ -250,3 +250,40 @@ def fine_calendario() -> date:
     """Ultima data coperta dal calendario (eventi ad alto impatto e chiusure USA).
     Dopo questa data il filtro non blocca più NFP, CPI, FOMC e festività."""
     return max(max(d for (d, _, _, _) in EVENTI_ALTO_IMPATTO), max(GIORNI_USA_CHIUSI))
+
+
+# ── Orari di mercato (per l'avviso "dati fermi") ──────────────────────────────
+# Approssimazioni: bastano a capire se Yahoo DOVREBBE dare candele nuove.
+#  - "future" (oro e altri future CME, Globex): da domenica 18:00 a venerdì 17:00 di
+#    New York, con una pausa ogni giorno 17:00–18:00 ET; chiuso nei GIORNI_ORO_CHIUSI.
+#    Non conosce gli orari ridotti delle festività USA (es. Thanksgiving).
+#  - "usa" (indici e azioni): lunedì–venerdì 09:30–16:00 ET, esclusi GIORNI_USA_CHIUSI,
+#    e fino alla chiusura anticipata nelle MEZZE_SEDUTE_USA.
+def mercato_aperto(tipo: str, t: datetime) -> bool:
+    et = t.astimezone(ET_TZ)
+    d, ora, wd = et.date(), et.time(), et.weekday()
+    if tipo == "future":
+        if d in GIORNI_ORO_CHIUSI or wd == 5:
+            return False
+        if wd == 6:
+            return ora >= time(18, 0)
+        if wd == 4:
+            return ora < time(17, 0)
+        return not (time(17, 0) <= ora < time(18, 0))
+    if wd >= 5 or d in GIORNI_USA_CHIUSI:
+        return False
+    chiusura = MEZZE_SEDUTE_USA.get(d, time(16, 0))
+    return time(9, 30) <= ora < chiusura
+
+
+def minuti_di_mercato(tipo: str, da: datetime, a: datetime, passo_min: int = 5) -> int:
+    """Minuti di mercato aperto tra `da` e `a` (a passi di `passo_min` minuti)."""
+    if a <= da:
+        return 0
+    passo = timedelta(minutes=passo_min)
+    n, t = 0, da
+    while t < a and n < 100_000:
+        if mercato_aperto(tipo, t):
+            n += passo_min
+        t += passo
+    return n

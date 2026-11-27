@@ -143,6 +143,7 @@ Se ci sono altre posizioni teoriche aperte (dal registro e dal ritracciamento), 
 Il bot ti scrive su Telegram quando:
 - una strategia va in errore per **3 controlli di fila** (e di nuovo quando torna a funzionare);
 - **Yahoo non restituisce dati** per uno strumento da più di 45 minuti (e quando tornano);
+- **i dati sono fermi**: Yahoo risponde ma l'ultima candela non avanza da più di 2 ore di mercato aperto (e quando riprendono). Orari usati: future (oro) da domenica 18:00 a venerdì 17:00 di New York con pausa 17–18; indici e azioni 09:30–16:00 di New York, con festività e mezze sedute del calendario. Non conosce gli orari ridotti delle festività USA dei future: in quei giorni l'avviso può arrivare anche se la borsa è legittimamente chiusa;
 - il **calendario notizie** sta per finire: dai 60 giorni prima dell'ultima data, al massimo una volta a settimana;
 - lo **scheduler si blocca**: se per 20 minuti non dà segni di vita il bot si riavvia da solo (Railway lo riavvia) e il controllo di salute risponde `503` invece di `OK`.
 
