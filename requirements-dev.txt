@@ -1,0 +1,4 @@
+# Solo per i test (non servono su Railway)
+-r requirements.txt
+pytest==9.2.0
+pyflakes==4.1.0
