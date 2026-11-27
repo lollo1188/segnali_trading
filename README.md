@@ -21,7 +21,7 @@ Bot di segnali semi-automatico per i CFD di Revolut. Gira H24 su Railway e ti ma
 
 Le strategie 1, 2, 3, 6, 7 e 8 sono **intraday**: chiudi entro le 21:45 CET. Le strategie 4 e 5 possono restare aperte overnight.
 
-Dopo un segnale, la stessa strategia nella stessa direzione non viene riproposta per un periodo di pausa (4–12 ore a seconda della strategia). Questa pausa è tenuta in memoria: si azzera a ogni riavvio del bot.
+Dopo un segnale, la stessa strategia nella stessa direzione non viene riproposta per un periodo di pausa (4–12 ore a seconda della strategia). Questa pausa è salvata nel file di stato (vedi *Memoria del bot* sotto) e sopravvive ai riavvii.
 
 ### Strategie su azioni singole (6, 7, 8)
 
@@ -45,8 +45,8 @@ Stessa logica dell'ORB S&P500 (breakout della candela delle 15:30 con VWAP, EMA2
 Segnale a fine seduta USA, **ingresso all'apertura del giorno dopo**, solo long:
 - **Trend**: chiusura sopra la media a 200 giorni. **Ingresso**: RSI(2) sotto 10.
 - **Uscita**: la chiusura supera la media a 5 giorni (si vende all'apertura dopo), oppure stop a 3×ATR dall'ingresso, oppure massimo 10 giorni.
-- Il bot controlla alle 22:10 e alle 22:40 (lun–ven) e manda: **ENTRATA** (con stop e livello d'uscita), poi un promemoria serale **MANTIENI / ESCI / STOP**.
-- **Il bot non conosce le tue posizioni**: segue una posizione *teorica* dal segnale. Se non apri il CFD, ignora i promemoria. Dopo un riavvio la memoria si azzera e i promemoria si fermano: in quel caso gestisci l'uscita a mano con la regola sopra.
+- Il bot controlla alle 16:10 e alle 16:40 di New York (di solito 22:10 e 22:40 italiane, lun–ven) e manda: **ENTRATA** (con stop e livello d'uscita), poi un promemoria serale **MANTIENI / ESCI / STOP**.
+- **Il bot non conosce le tue posizioni**: segue una posizione *teorica* dal segnale. Se non apri il CFD, ignora i promemoria. La posizione teorica è salvata su file e sopravvive ai riavvii, **purché su Railway ci sia il volume `/data`** (STEP 4b). Senza volume si perde a ogni deploy: in quel caso gestisci l'uscita a mano con la regola sopra.
 - Se l'ingresso cade nel giorno dei risultati trimestrali (`UTILI` in `news_filter.py`) il segnale viene saltato e te lo dice. Se domani c'è un evento in calendario (NFP, CPI, FOMC) il messaggio lo segnala.
 - Risultati del backtest (`trend`, `trend_azioni`): S&P 500 PF ≈1,43 sia nello sviluppo sia nella verifica (506 trade dal 1993); AVGO PF 1,39 e 1,77 (270 trade dal 2010); **CAT non mostra vantaggio e non è inclusa**. Il vantaggio per trade è piccolo (circa +1% l'anno a rischio 1%) e AVGO è un titolo con un trend eccezionale: **prova solo in demo per 4–8 settimane**.
 - Il backtest esce alla chiusura, il live all'apertura del giorno dopo: la riga "Uscita apertura dopo (live)" di `python3 backtest.py trend` mostra quanto cambia.
@@ -54,6 +54,8 @@ Segnale a fine seduta USA, **ingresso all'apertura del giorno dopo**, solo long:
 ---
 
 ## 🕐 Quando arrivano i segnali (ora italiana, lun–ven)
+
+Le strategie USA (ORB, Kumo Nasdaq, ritracciamento) seguono l'**ora di New York**: gli orari sotto valgono per la maggior parte dell'anno. Nelle settimane in cui l'ora legale USA ed Europa è sfasata (marzo e fine ottobre/inizio novembre) arrivano **un'ora prima** (es. ORB S&P500 dalle 15:00, chiusura intraday alle 20:45). Il messaggio indica sempre l'ora giusta di chiusura.
 
 | Strategia | Orari possibili | Note |
 |-----------|-----------------|------|
@@ -99,7 +101,7 @@ Le finestre sono definite in **ora di New York** e convertite in ora italiana pe
 - La data degli utili di ANT non è ancora inserita.
 - Il calendario copre fino a dicembre 2027: va esteso al 2028.
 - Gli orari dell'oro nei giorni festivi sono un'approssimazione: verifica quelli del tuo CFD.
-- Le strategie hanno comunque orari propri in ora italiana (per esempio la candela delle 15:30 per l'ORB) che restano sfasati nelle settimane con ora legale non allineata.
+- Le strategie USA usano anch'esse l'ora di New York (opening range = candela delle 09:30 ET). Le strategie sull'oro restano in ora italiana.
 
 ---
 
@@ -117,6 +119,7 @@ Esempio di segnale ORB:
 🛑 Stop: 7152.66
 ✅ Target: 7591.21
 📐 R:R: 1:2.5
+📏 Distanze dall'entry: stop -125.30 | TP1 +187.95 | target +313.25
 ━━━━━━━━━━━━━━━━━━━━
 ⏱ SLITTAMENTO: +17.04 pt (+0.23%) — 🟡 Slittamento moderato
 Prezzo ora 7295.00 vs entry 7277.96 (14% del rischio contro di te)
@@ -125,7 +128,7 @@ Prezzo ora 7295.00 vs entry 7277.96 (14% del rischio contro di te)
 ℹ️ Prezzo Yahoo: confrontalo con quello su Revolut
 ━━━━━━━━━━━━━━━━━━━━
 📝 Breakout OR high 7260.17 | Sopra VWAP | TP1 7465.91 → sposta SL a BE | Chiudi entro 21:45
-⏱ INTRADAY — chiudi entro 21:45 CET
+⏱ INTRADAY — chiudi entro le 21:45 (ora italiana)
 ⚠️ Rischia max 1.5% capitale
 🕐 Inviato 23/11 16:32
 ```
@@ -135,6 +138,7 @@ Prezzo ora 7295.00 vs entry 7277.96 (14% del rischio contro di te)
 - **Candela**: la candela su cui il bot ha deciso. L'entry è la chiusura di quella candela.
 - **Entry / Stop / Target**: livelli teorici calcolati sui dati di Yahoo Finance.
 - **R:R**: rapporto rischio/rendimento del segnale. È un testo calcolato con stop e target originali.
+- **Distanze dall'entry**: stop e target come differenza dal prezzo d'ingresso. Applicale al prezzo che vedi su Revolut quando i prezzi non coincidono.
 - **Inviato**: ora di invio, non della candela. Più è lontana dalla candela, più il segnale è vecchio.
 - **TP1 → sposta SL a BE** (solo ORB): arrivato a TP1, porta lo stop sul prezzo d'ingresso.
 
@@ -152,6 +156,10 @@ Il bot confronta l'entry con l'ultimo prezzo disponibile al momento dell'invio:
 "Contro di te" vuol dire che entreresti a un prezzo peggiore di quello del segnale; "a tuo favore" il contrario. Il blocco mostra anche il **R:R entrando ora** (con stop e target originali) e i livelli **ricalcolati con le stesse distanze** dal prezzo attuale. Se il prezzo attuale non è disponibile, il blocco viene omesso.
 
 > ℹ️ Il prezzo usato è quello di **Yahoo Finance**, non quello di Revolut. I CFD di Revolut hanno un prezzo e uno spread propri: confronta sempre con l'app prima di entrare.
+
+### ⚠️ Oro: prezzi del future, non dello spot
+
+Le strategie sull'oro (1, 2, 4) leggono il **future COMEX** (`GC=F`), mentre il CFD oro di Revolut segue lo **spot** (XAU/USD). I due prezzi differiscono di solito di **decine di dollari**, quindi entry, stop e target del messaggio **non sono i livelli da inserire su Revolut**. I messaggi sull'oro lo segnalano: usa la riga **Distanze dall'entry** e applicala al tuo prezzo d'ingresso su Revolut (es. LONG entrato a 2620,50 con distanza stop −11,60 → stop a 2608,90). Le distanze sono quasi identiche tra future e spot.
 
 ---
 
@@ -213,9 +221,9 @@ Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine s
 
 ## 🧱 Limiti noti del bot
 
-- **Dati Yahoo Finance**, non il prezzo del CFD di Revolut.
+- **Dati Yahoo Finance**, non il prezzo del CFD di Revolut. Per l'oro è il future, con prezzi diversi dallo spot: usa le distanze.
 - I controlli girano ogni 15 minuti dall'avvio, non allineati alle candele: l'entry può essere vecchia fino a circa 15 minuti. Per questo esiste il blocco slittamento.
-- L'opening range è fissato alle 15:30 CET. Nelle settimane in cui l'ora legale USA ed Europa è sfasata (marzo e fine ottobre/inizio novembre) l'apertura USA cade alle 14:30 e il bot userebbe la candela sbagliata.
+- Il backtest (`backtest.py`) usa ancora l'opening range delle 15:30 italiane: nelle settimane con ora legale sfasata simula la candela sbagliata (pochi giorni l'anno, effetto piccolo).
 - Il bot non conosce i giorni festivi o le mezze sedute di Wall Street. Le strategie su azioni (6, 7, 8) controllano che la candela sia recente; le altre no, e in quei giorni possono proporre segnali basati su candele vecchie. Ignorali.
 - Il filtro notizie dipende da un calendario che aggiorni tu e non copre le notizie impreviste (vedi sezione dedicata).
 - Non segue le operazioni: non controlla stop e target e non ti avvisa del TP1 o della chiusura serale.
@@ -229,7 +237,7 @@ Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine s
 
 1. Vai su [github.com](https://github.com) → **New repository**
 2. Dagli un nome (es. `trading-bot`) → **Create repository**
-3. Carica tutti i file: `main.py`, `strategies.py`, `notifier.py`, `news_filter.py`, `backtest.py`, `requirements.txt`, `Procfile`, `railway.toml`
+3. Carica tutti i file: `main.py`, `strategies.py`, `notifier.py`, `news_filter.py`, `stato.py`, `backtest.py`, `requirements.txt`, `Procfile`, `railway.toml`
 4. Clicca **Commit changes**
 
 ### STEP 2 — Crea account Railway
@@ -256,6 +264,16 @@ Variabili **opzionali** (strategie su azioni):
 - `STRATEGIE_SPENTE` = elenco di strategie da **spegnere**, separate da virgole (es. `orb_cat,orb_avgo`). Nomi validi: `vwap_gold`, `london_sweep`, `orb_sp500`, `orb_ant`, `orb_cat`, `orb_avgo`, `kumo_gold_4h`, `kumo_nasdaq`, `pullback_sp500`, `pullback_avgo`. Variabile assente o vuota = tutte attive. Per riaccenderle togli il nome: Railway riavvia il bot da solo. Il messaggio di avvio su Telegram mostra quali sono spente.
 
 Railway riavvia il bot da solo.
+
+### STEP 4b — Volume per la memoria del bot
+
+Il bot salva in un file la pausa tra segnali e le posizioni teoriche del ritracciamento. Perché il file sopravviva ai deploy serve un **volume**:
+
+1. Nel progetto Railway, clic destro sul servizio (o **⌘K → Volume**) → **Add Volume**
+2. **Mount path**: `/data`
+3. Railway riavvia il bot: il messaggio di avvio deve dire "💾 Memoria ripristinata" e non "⚠️ Nessun volume /data"
+
+Senza volume il bot funziona lo stesso, ma la memoria si perde a ogni deploy. Per un percorso diverso imposta la variabile `STATO_PATH`.
 
 ### STEP 5 — Verifica
 

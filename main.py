@@ -44,7 +44,7 @@ try:
         check_vwap_reversal_gold, check_london_sweep_gold,
         check_orb_sp500, check_kumo_gold_4h, check_kumo_nasdaq_1h,
         check_orb_ant, check_orb_cat, check_orb_avgo, analizza_pullback,
-        get_last_price, fmt, TICKER_GOLD, TICKER_SP500, TICKER_NASDAQ,
+        get_last_price, fmt, in_orario_et, ET_TZ, TICKER_GOLD, TICKER_SP500, TICKER_NASDAQ,
         TICKER_ANT, TICKER_CAT, TICKER_AVGO,
     )
     logger.info("Strategies importate OK")
@@ -67,8 +67,25 @@ except Exception as e:
     def motivo_blocco(name=None): return None
 
 
+try:
+    import stato
+    _STATO = stato.carica()
+    logger.info(f"Stato salvato in {stato.percorso()}"
+                + ("" if stato.su_volume() else " — ⚠️ nessun volume /data: si perde a ogni deploy"))
+except Exception as e:
+    logger.error(f"Errore import stato: {e}")
+    stato = None
+    _STATO = {"last_signals": {}, "posizioni_pb": {}, "ultimo_pb": {}}
+
+
 # ── Logica bot ────────────────────────────────────────────────────────────────
-last_signals: dict = {}
+# Memoria del bot: caricata dal file di stato e salvata a ogni modifica.
+last_signals: dict = _STATO["last_signals"]
+
+
+def salva_stato():
+    if stato is not None:
+        stato.salva(last_signals, posizioni_pb, ultimo_pb)
 
 # Ticker da cui leggere il prezzo attuale per ogni strategia (slittamento)
 SIGNAL_TICKER = {
@@ -120,6 +137,7 @@ def should_send(name, direction, cooldown_h=4):
 
 def register(name, direction):
     last_signals[name] = {"direction": direction, "timestamp": datetime.now(ROME_TZ)}
+    salva_stato()
 
 
 def _pianifica_ripetizione(name, fn, cooldown_h):
@@ -177,16 +195,16 @@ def job_london_sweep():
     run_check("london_sweep", check_london_sweep_gold, 12)
 
 
+# Strategie USA: finestre in ORA DI NEW YORK (seguono l'apertura di Wall Street
+# anche nelle settimane con ora legale USA/Europa sfasata).
 def job_orb_sp500():
-    now = datetime.now(ROME_TZ)
-    if not (time(15, 45) <= now.time() <= time(21, 45)): return
+    if not in_orario_et(time(9, 45), time(15, 45)): return      # 15:45–21:45 italiane
     logger.info("▶ ORB S&P500")
     run_check("orb_sp500", check_orb_sp500, 8)
 
 
 def _job_orb_azione(name, label, fn):
-    now = datetime.now(ROME_TZ)
-    if not (time(16, 0) <= now.time() <= time(20, 30)): return
+    if not in_orario_et(time(10, 0), time(14, 30)): return      # 16:00–20:30 italiane
     logger.info(f"▶ ORB {label}")
     run_check(name, fn, 8)
 
@@ -209,8 +227,8 @@ PULLBACK = {
     "pullback_sp500": (TICKER_SP500, "S&P 500"),
     "pullback_avgo": (TICKER_AVGO, "Broadcom (AVGO)"),
 }
-posizioni_pb: dict = {}      # posizione TEORICA per strategia (si azzera ai riavvii)
-ultimo_pb: dict = {}         # data dell'ultima candela già elaborata
+posizioni_pb: dict = _STATO["posizioni_pb"]   # posizione TEORICA per strategia (salvata su file)
+ultimo_pb: dict = _STATO["ultimo_pb"]         # data dell'ultima candela già elaborata
 
 
 def job_pullback(name):
@@ -230,6 +248,7 @@ def job_pullback(name):
             posizioni_pb[name] = pos
         else:
             posizioni_pb.pop(name, None)
+        salva_stato()
         if msg and send_pullback(msg):
             logger.info(f"[{name}] Messaggio inviato: {msg['tipo']}")
         elif msg:
@@ -253,8 +272,7 @@ def job_kumo_gold_4h():
 
 
 def job_kumo_nasdaq():
-    now = datetime.now(ROME_TZ)
-    if not (time(15, 30) <= now.time() <= time(21, 0)): return
+    if not in_orario_et(time(9, 30), time(15, 0)): return       # 15:30–21:00 italiane
     logger.info("▶ Kumo Rider Nasdaq 1H")
     run_check("kumo_nasdaq", check_kumo_nasdaq_1h, 8)
 
@@ -281,21 +299,30 @@ try:
     _aggiungi_job(job_orb_avgo, "orb_avgo", "interval", minutes=15)
     _aggiungi_job(job_kumo_gold_4h, "kumo_gold_4h", "cron", hour="0,4,8,12,16,20", minute=20)
     _aggiungi_job(job_kumo_nasdaq, "kumo_nasdaq", "cron", minute=5)
-    # Ritracciamento giornaliero: dopo la chiusura USA (22:00 italiane, 21:00 nelle settimane
-    # con ora legale sfasata). Due controlli: se Yahoo è in ritardo il secondo recupera.
-    for _ora, _min, _suf in ((22, 10, "a"), (22, 40, "b")):
+    # Ritracciamento giornaliero: dopo la chiusura USA, in ora di New York (16:10 e 16:40 ET,
+    # di solito 22:10 e 22:40 italiane). Due controlli: se Yahoo è in ritardo il secondo recupera.
+    for _ora, _min, _suf in ((16, 10, "a"), (16, 40, "b")):
         for _nome, _fn in (("pullback_sp500", job_pullback_sp500), ("pullback_avgo", job_pullback_avgo)):
             if _nome in STRATEGIE_SPENTE:
                 continue
             scheduler.add_job(_fn, "cron", day_of_week="mon-fri", hour=_ora, minute=_min,
-                              id=f"{_nome}_{_suf}")
+                              timezone=ET_TZ, id=f"{_nome}_{_suf}")
     scheduler.start()
     logger.info("Scheduler avviato")
 except Exception as e:
     logger.error(f"Errore scheduler: {e}")
 
 try:
-    if send_startup_message(sorted(STRATEGIE_SPENTE)):
+    if stato is None:
+        _nota = "⚠️ Memoria su file non disponibile (vedi log)"
+    elif not stato.su_volume():
+        _nota = "⚠️ Nessun volume /data: la memoria si perde a ogni deploy"
+    elif posizioni_pb:
+        _nota = "💾 Posizioni teoriche ripristinate: " + ", ".join(
+            f"{PULLBACK[k][1]} (ingresso {v['entry_date']:%d/%m})" for k, v in posizioni_pb.items() if k in PULLBACK)
+    else:
+        _nota = "💾 Memoria ripristinata"
+    if send_startup_message(sorted(STRATEGIE_SPENTE), _nota):
         logger.info("Messaggio avvio inviato")
     else:
         logger.error("Messaggio avvio NON inviato (vedi errore Telegram sopra)")

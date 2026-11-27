@@ -1,2 +1,4 @@
 __pycache__/
 *.pyc
+stato.json
+stato.json.tmp

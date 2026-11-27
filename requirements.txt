@@ -1,6 +1,8 @@
-yfinance>=1.0.0
-pandas>=2.0.0
-numpy>=1.24.0
+# Versioni bloccate (verificate con Python 3.11, la versione usata su Railway).
+# Per aggiornare: cambia un numero alla volta, prova in locale, poi fai il deploy.
+yfinance==1.8.0
+pandas==3.1.1
+numpy==2.4.6
 APScheduler==3.10.4
-requests>=2.28.0
-pytz>=2023.3
+requests==2.34.2
+pytz==2026.6
