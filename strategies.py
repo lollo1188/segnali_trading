@@ -1,10 +1,10 @@
 """
 STRATEGIE DI TRADING
-1. VWAP Reversal Oro 15min — intraday (non verificata: assente dal backtest)
-2. London Liquidity Sweep Oro — intraday (non verificata: assente dal backtest)
+1. VWAP Reversal Oro 15min — intraday (backtest 60 giorni: PF 1,71 su 10 trade, campione troppo piccolo)
+2. London Liquidity Sweep Oro — intraday (backtest 60 giorni: PF 0,69 su 8 trade)
 3. ORB S&P500 15min — intraday (backtest 60 giorni: PF ≈1,00, nessun vantaggio)
-4. Kumo Rider Oro 4H — swing overnight OK (non verificata: assente dal backtest)
-5. Kumo Rider Nasdaq 1H — swing overnight OK (non verificata: assente dal backtest)
+4. Kumo Rider Oro 4H — swing overnight OK (backtest 2 anni: PF 0,83 su 10 trade)
+5. Kumo Rider Nasdaq 1H — swing overnight OK (backtest 2 anni: 5 trade, tutti in perdita)
 6. ORB Anthropic ANT 15min — intraday (SPERIMENTALE: storico troppo breve per un backtest)
 7. ORB Caterpillar CAT 15min — intraday (non validata: usa backtest.py azioni)
 8. ORB Broadcom AVGO 15min — intraday (non validata: usa backtest.py azioni)
@@ -12,7 +12,8 @@ STRATEGIE DI TRADING
      (backtest: S&P 500 PF ≈1,43, AVGO PF 1,39–1,77; vantaggio piccolo)
 
 I PF scritti in passato per le strategie 1-5 (1.84, 1.55, 1.40, 1.62, 1.51) non
-erano confermati da nessuno script del repository e sono stati tolti.
+erano confermati da nessuno script del repository e sono stati tolti. Risultati
+attuali: `python3 backtest.py bot` (1, 2, 4, 5) e `python3 backtest.py orb` (3).
 
 Orari: le strategie USA (ORB, Kumo Nasdaq, ritracciamento) usano l'ORA DI NEW YORK,
 così restano agganciate all'apertura di Wall Street anche nelle settimane in cui
@@ -180,7 +181,7 @@ def candle_label(ts, minutes: int) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STRATEGIA 1 — VWAP REVERSAL ORO 15min (non verificata da backtest)
+# STRATEGIA 1 — VWAP REVERSAL ORO 15min (backtest: PF 1,71 su 10 trade, non dimostrata)
 # Intraday — chiusura entro 21:45 CET
 # Prezzo esteso oltre +2σ/−2σ VWAP + RSI estremo + candela di inversione
 # ══════════════════════════════════════════════════════════════════════════════
@@ -253,7 +254,7 @@ def check_vwap_reversal_gold() -> Optional[dict]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STRATEGIA 2 — LONDON LIQUIDITY SWEEP ORO (non verificata da backtest)
+# STRATEGIA 2 — LONDON LIQUIDITY SWEEP ORO (backtest: PF 0,69 su 8 trade)
 # Intraday — finestra 08:00-10:00 CET
 # Falso breakdown del range asiatico 06:00-08:00 → entrata LONG
 # ══════════════════════════════════════════════════════════════════════════════
@@ -430,7 +431,7 @@ def check_orb_sp500() -> Optional[dict]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STRATEGIA 4 — KUMO RIDER ORO 4H (non verificata da backtest)
+# STRATEGIA 4 — KUMO RIDER ORO 4H (backtest: PF 0,83 su 10 trade)
 # Swing — overnight OK se segnale forte
 # Ichimoku 9/26/52 + RSI 40-65
 # ══════════════════════════════════════════════════════════════════════════════
@@ -516,7 +517,7 @@ def check_kumo_gold_4h() -> Optional[dict]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STRATEGIA 5 — KUMO RIDER NASDAQ 1H (non verificata da backtest)
+# STRATEGIA 5 — KUMO RIDER NASDAQ 1H (backtest: 5 trade, tutti in perdita)
 # Swing — overnight OK se segnale forte
 # Ichimoku 9/26/52 + RSI 40-65 + filtro orario 09:30-15:00 ET (15:30-21:00 italiane)
 # ══════════════════════════════════════════════════════════════════════════════

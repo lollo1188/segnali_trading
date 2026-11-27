@@ -5,6 +5,7 @@ Esegui con: python3 backtest.py          (4 strategie storiche)
             python3 backtest.py azioni   (ORB su CAT e AVGO)
             python3 backtest.py trend    (ritracciamento nel trend, S&P500 giornaliero)
             python3 backtest.py trend_azioni   (stessa idea su CAT e AVGO)
+            python3 backtest.py bot      (VWAP Reversal, London Sweep, Kumo Oro e Nasdaq)
 
 VERSIONE CORRETTA:
  - PF = profitti netti / perdite nette su TUTTI i trade (anche quelli "OPEN",
@@ -1088,6 +1089,229 @@ def backtest_pullback_azioni():
     ]
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# STRATEGIE DEL BOT 1, 2, 4, 5 — VWAP Reversal Oro, London Sweep Oro,
+# Kumo Rider Oro 4H, Kumo Rider Nasdaq 1H
+# Esegui con: python3 backtest.py bot
+#
+# Stesse regole di strategies.py, valutate candela per candela solo con i dati
+# già chiusi (nessun lookahead). Uscita: stop o target toccati sulle candele
+# successive; altrimenti chiusura forzata (intraday alle 21:45 italiane, swing
+# dopo un numero massimo di candele) → colonna "Open".
+# Pausa tra segnali nella stessa direzione come nel bot (4h VWAP, 12h London e
+# Kumo Oro, 8h Kumo Nasdaq).
+#
+# Semplificazioni (vedi anche i limiti nel README):
+#  - prezzi del future COMEX (GC=F) per l'oro, come il bot;
+#  - London Sweep: tutta la posizione a target o stop (il bot suggerisce TP1 al 50%
+#    e trailing di $4, non simulati);
+#  - Kumo: chikou = chiusura attuale > chiusura di 26 candele prima (regola
+#    Ichimoku standard); swing senza commissione notturna;
+#  - filtro notizie non applicato;
+#  - se nella stessa candela si toccano stop e target, conta lo stop (prudente).
+# ⚠️ Dati Yahoo: 15 minuti solo per ~60 giorni → VWAP e London Sweep hanno pochi trade.
+# ═════════════════════════════════════════════════════════════════════════════
+def _indice_roma(df):
+    if df.index.tz is None:
+        df.index = df.index.tz_localize("UTC")
+    df.index = df.index.tz_convert(ROME_TZ)
+    return df
+
+
+def _pausa_ok(ultimi, direzione, ts, ore):
+    """Pausa del bot: stessa direzione non riproposta prima di `ore` ore."""
+    prec = ultimi.get(direzione)
+    return prec is None or (ts - prec) >= pd.Timedelta(hours=ore)
+
+
+def _uscita_intraday(df, i, direzione, sl, tp, fine=time(21, 45)):
+    """Candele dopo la i-esima, fino alle 21:45 italiane dello stesso giorno."""
+    giorno = df.index[i].date()
+    dopo = df.iloc[i + 1:]
+    dopo = dopo[(dopo.index.date == giorno) & (dopo.index.time < fine)]
+    return _forward_exit(dopo, direzione, sl, tp)
+
+
+def _uscita_swing(df, i, direzione, sl, tp, max_candele):
+    return _forward_exit(df.iloc[i + 1:i + 1 + max_candele], direzione, sl, tp)
+
+
+def backtest_vwap_reversal_oro():
+    print("⏳ Backtest VWAP REVERSAL ORO (15min, ~60 giorni)...")
+    df = get_data("GC=F", "60d", "15m")
+    if df is None:
+        return None
+    df = _indice_roma(df)
+    df["rsi14"] = rsi(df["Close"], 14)
+    df["atr14"] = atr_calc(df, 14)
+    giorni = df.index.date
+    vw, up, dn = [], [], []
+    for d in pd.unique(giorni):
+        g = df[giorni == d]
+        tp_ = (g["High"] + g["Low"] + g["Close"]) / 3
+        v = (tp_ * g["Volume"]).cumsum() / g["Volume"].cumsum()
+        sd = np.sqrt(((tp_ - v) ** 2 * g["Volume"]).cumsum() / g["Volume"].cumsum())
+        vw.append(v); up.append(v + 2 * sd); dn.append(v - 2 * sd)
+    df["vwap"] = pd.concat(vw).reindex(df.index)
+    df["vb2u"] = pd.concat(up).reindex(df.index)
+    df["vb2d"] = pd.concat(dn).reindex(df.index)
+    df = df.dropna()
+
+    signals, ultimi = [], {}
+    for i in range(1, len(df) - 1):
+        curr, prev = df.iloc[i], df.iloc[i - 1]
+        ts = df.index[i]
+        if not (time(8, 0) <= ts.time() <= time(21, 45)):
+            continue
+        entry, a = curr["Close"], curr["atr14"]
+        sig = None
+        if entry < curr["vb2d"] and curr["rsi14"] < 35 and curr["Close"] > prev["Close"]:
+            sl, tp = entry - 1.2 * a, curr["vwap"]
+            if (tp - entry) >= 1.5 * (entry - sl):
+                sig = (1, sl, tp)
+        elif entry > curr["vb2u"] and curr["rsi14"] > 65 and curr["Close"] < prev["Close"]:
+            sl, tp = entry + 1.2 * a, curr["vwap"]
+            if (entry - tp) >= 1.5 * (sl - entry):
+                sig = (-1, sl, tp)
+        if sig is None or not _pausa_ok(ultimi, sig[0], ts, 4):
+            continue
+        uscita = _uscita_intraday(df, i, sig[0], sig[1], sig[2])
+        if uscita is None:
+            continue
+        ultimi[sig[0]] = ts
+        signals.append({"entry": entry, "sl": sig[1], "tp": sig[2], "direction": sig[0],
+                        "next_close": uscita})
+    if not signals:
+        print("  Nessun segnale")
+        return None
+    return simulate(pd.DataFrame(signals), COSTS["GOLD"], "🟡 VWAP REVERSAL ORO")
+
+
+def backtest_london_sweep_oro():
+    print("⏳ Backtest LONDON SWEEP ORO (15min, ~60 giorni)...")
+    df = get_data("GC=F", "60d", "15m")
+    if df is None:
+        return None
+    df = _indice_roma(df)
+    df["sma20"] = df["Close"].rolling(20).mean()
+    df["atr14"] = atr_calc(df, 14)
+    df = df.dropna()
+
+    signals = []
+    for d in sorted(set(df.index.date)):
+        oggi = df[df.index.date == d]
+        asia = oggi[(oggi.index.time >= time(6, 0)) & (oggi.index.time < time(8, 0))]
+        if len(asia) < 3:
+            continue
+        asia_low, asia_high = asia["Low"].min(), asia["High"].max()
+        # Il bot valuta le candele chiuse con inizio 08:15–09:45 (la 08:00 non è mai "curr")
+        for ts in oggi.index:
+            if not (time(8, 15) <= ts.time() <= time(9, 45)):
+                continue
+            i = df.index.get_loc(ts)
+            if i < 4:
+                continue
+            curr = df.iloc[i]
+            depth = asia_low - curr["Low"]
+            if not (2.0 <= depth <= 5.0) or curr["Close"] <= asia_low:
+                continue
+            if df["sma20"].iloc[i] - df["sma20"].iloc[i - 3] > 0.5:
+                continue
+            entry = curr["Close"]
+            sl, tp = curr["Low"] - 3.0, asia_high
+            risk = entry - sl
+            if risk <= 0 or risk > 15:
+                continue
+            uscita = _uscita_intraday(df, i, 1, sl, tp)
+            if uscita is None:
+                continue
+            signals.append({"entry": entry, "sl": sl, "tp": tp, "direction": 1,
+                            "next_close": uscita})
+            break      # pausa 12h: al massimo un segnale al giorno
+    if not signals:
+        print("  Nessun segnale")
+        return None
+    return simulate(pd.DataFrame(signals), COSTS["GOLD"], "🟡 LONDON SWEEP ORO")
+
+
+def _segnali_kumo(df, filtro_orario=None, pausa_ore=12, max_candele=60):
+    """Kumo Rider: incrocio Tenkan/Kijun + prezzo oltre la nuvola + RSI + chikou.
+    df già con indice italiano. filtro_orario(ts) -> bool sulle candele valutabili."""
+    h, l, c = df["High"], df["Low"], df["Close"]
+    df = df.copy()
+    df["t_sen"] = (h.rolling(9).max() + l.rolling(9).min()) / 2
+    df["k_sen"] = (h.rolling(26).max() + l.rolling(26).min()) / 2
+    df["s_a"] = ((df["t_sen"] + df["k_sen"]) / 2).shift(26)
+    df["s_b"] = ((h.rolling(52).max() + l.rolling(52).min()) / 2).shift(26)
+    df["c_26"] = c.shift(26)              # chikou: chiusura di 26 candele prima
+    df["rsi14"] = rsi(c, 14)
+    df["atr14"] = atr_calc(df, 14)
+    df = df.dropna()
+
+    signals, ultimi = [], {}
+    for i in range(1, len(df) - 1):
+        curr, prev = df.iloc[i], df.iloc[i - 1]
+        ts = df.index[i]
+        if filtro_orario and not filtro_orario(ts):
+            continue
+        top, bot = max(curr["s_a"], curr["s_b"]), min(curr["s_a"], curr["s_b"])
+        up = prev["t_sen"] <= prev["k_sen"] and curr["t_sen"] > curr["k_sen"]
+        dn = prev["t_sen"] >= prev["k_sen"] and curr["t_sen"] < curr["k_sen"]
+        entry, a = curr["Close"], curr["atr14"]
+        sig = None
+        if (up and entry > top and 40 < curr["rsi14"] < 65 and entry > curr["c_26"]
+                and curr["t_sen"] > curr["s_a"] and curr["t_sen"] > curr["s_b"]):
+            sl = curr["k_sen"] - 0.3 * a
+            if entry - sl > 0:
+                sig = (1, sl, entry + 2.0 * (entry - sl))
+        elif (dn and entry < bot and 35 < curr["rsi14"] < 60 and entry < curr["c_26"]
+                and curr["t_sen"] < curr["s_a"] and curr["t_sen"] < curr["s_b"]):
+            sl = curr["k_sen"] + 0.3 * a
+            if sl - entry > 0:
+                sig = (-1, sl, entry - 2.0 * (sl - entry))
+        if sig is None or not _pausa_ok(ultimi, sig[0], ts, pausa_ore):
+            continue
+        uscita = _uscita_swing(df, i, sig[0], sig[1], sig[2], max_candele)
+        if uscita is None:
+            continue
+        ultimi[sig[0]] = ts
+        signals.append({"entry": entry, "sl": sig[1], "tp": sig[2], "direction": sig[0],
+                        "next_close": uscita})
+    return signals
+
+
+def backtest_kumo_oro_4h():
+    print("⏳ Backtest KUMO RIDER ORO 4H (~2 anni)...")
+    df_1h = get_data("GC=F", "2y", "1h")
+    if df_1h is None:
+        return None
+    df = resample_4h(_indice_roma(df_1h))
+    # uscita forzata dopo 60 candele 4H (~10 giorni di borsa)
+    signals = _segnali_kumo(df, pausa_ore=12, max_candele=60)
+    if not signals:
+        print("  Nessun segnale")
+        return None
+    return simulate(pd.DataFrame(signals), COSTS["GOLD"], "🟡 KUMO RIDER ORO 4H")
+
+
+def backtest_kumo_nasdaq_1h():
+    print("⏳ Backtest KUMO RIDER NASDAQ 1H (~2 anni)...")
+    df = get_data("^NDX", "2y", "1h")
+    if df is None:
+        return None
+    df = _indice_roma(df)
+
+    def orario(ts):                      # candele con inizio 09:30–15:00 di New York
+        t = ts.tz_convert(ET_TZ).time()
+        return time(9, 30) <= t <= time(15, 0)
+    # uscita forzata dopo 70 candele 1H (~10 sedute)
+    signals = _segnali_kumo(df, filtro_orario=orario, pausa_ore=8, max_candele=70)
+    if not signals:
+        print("  Nessun segnale")
+        return None
+    return simulate(pd.DataFrame(signals), COSTS["NASDAQ"], "🔵 KUMO RIDER NASDAQ 1H")
+
+
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1 and sys.argv[1] == "orb":
@@ -1104,6 +1328,15 @@ if __name__ == "__main__":
         backtest_pullback_sp500()
     elif len(sys.argv) > 1 and sys.argv[1] == "trend_azioni":
         backtest_pullback_azioni()
+    elif len(sys.argv) > 1 and sys.argv[1] == "bot":
+        print("🔍 Backtest delle strategie 1, 2, 4, 5 del bot...\n")
+        results = [
+            backtest_vwap_reversal_oro(),
+            backtest_london_sweep_oro(),
+            backtest_kumo_oro_4h(),
+            backtest_kumo_nasdaq_1h(),
+        ]
+        print_results([r for r in results if r is not None])
     elif len(sys.argv) > 1 and sys.argv[1] == "azioni":
         print("🔍 Backtest ORB su azioni singole — circa 60 giorni di dati...\n")
         results = [

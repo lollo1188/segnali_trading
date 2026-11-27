@@ -201,6 +201,7 @@ python3 backtest.py orb    # confronto varianti ORB S&P500 (60 giorni)
 python3 backtest.py azioni # ORB su CAT e AVGO (60 giorni, un trade al giorno)
 python3 backtest.py trend  # ritracciamento nel trend, S&P500 giornaliero (dal 1993)
 python3 backtest.py trend_azioni  # stessa idea su CAT e AVGO (giornaliero)
+python3 backtest.py bot    # strategie 1, 2, 4, 5 del bot: VWAP Reversal, London Sweep, Kumo Oro 4H e Nasdaq 1H
 COSTI_X=2 python3 backtest.py orb # stress test: spread moltiplicati per 2
 ```
 
@@ -208,7 +209,9 @@ Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine s
 
 **Limiti da tenere presenti:**
 - Per i dati a 15 minuti Yahoo Finance fornisce solo circa 60 giorni: l'ORB viene testato su poche decine di trade, troppo poche per un PF affidabile.
-- Il backtest non include le strategie VWAP Reversal, London Sweep e Kumo Rider: **non hanno un PF verificato**. I valori scritti in passato nel codice e nel messaggio di avvio (1.84, 1.55, 1.40, 1.62, 1.51) sono stati tolti perché nessuno script li confermava.
+- Backtest `bot` (eseguito il 27/11/2026, costi Revolut attuali): **VWAP Reversal Oro** PF 1,71 su 10 trade (60 giorni); **London Sweep Oro** PF 0,69 su 8 trade (60 giorni); **Kumo Rider Oro 4H** PF 0,83 su 10 trade (2 anni); **Kumo Rider Nasdaq 1H** PF 0,00 su 5 trade (2 anni, tutti in perdita). Campioni minuscoli: **nessuna delle quattro dimostra un vantaggio**, e tre su quattro sono sotto 1. I PF scritti in passato (1.84, 1.55, 1.62, 1.51) non sono confermati.
+  - Semplificazioni: London Sweep senza TP1 al 50% e trailing; Kumo senza commissione notturna e con uscita forzata dopo circa 10 giorni; se nella stessa candela si toccano stop e target conta lo stop.
+  - Il backtest Kumo usa la regola chikou standard (chiusura attuale contro quella di 26 candele prima) sull'ultima candela chiusa.
 - Il backtest simula un solo trade al giorno e non gestisce il TP1 con break-even.
 - Nelle varianti ORB S&P500 il filtro sull'ampiezza dell'opening range usa l'ATR dell'intera giornata, quindi anche candele future (lookahead). Il backtest `azioni` non ha questo difetto.
 - Nessun backtest include il filtro notizie.
