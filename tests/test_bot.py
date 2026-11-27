@@ -95,3 +95,59 @@ def test_messaggio_mostra_il_rischio(bot, monkeypatch):
            "rischio_aperti": "📂 <b>Già aperti (teorici):</b> Kumo Nasdaq LONG\n"}
     notifier.send_telegram(sig)
     assert "Già aperti" in testi[0] and "Distanze dall'entry" in testi[0]
+
+
+def _fermo(bot, ticker, ultima, ora):
+    bot["SALUTE_DATI"].clear()
+    bot["SALUTE_DATI"][ticker] = {"fallimenti": 0, "ultimo_ok": ora - timedelta(minutes=5),
+                                  "errore": "", "ultima_candela": ultima}
+
+
+def test_dati_fermi_e_ripresa(bot, inviati, monkeypatch):
+    """Lo scenario del 27/11/2026: Yahoo risponde ma l'oro è fermo a giovedì 05:45."""
+    R = bot["ROME_TZ"]
+    ora = R.localize(datetime(2026, 11, 27, 11, 40))
+    ultima = R.localize(datetime(2026, 11, 26, 6, 0))            # chiusura candela 05:45–06:00
+
+    class Orologio(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return ora.astimezone(tz) if tz else ora
+    monkeypatch.setitem(bot, "datetime", Orologio)
+    bot["ticker_fermi"].clear()
+    _fermo(bot, "GC=F", ultima, ora)
+    bot["job_salute_dati"](); bot["job_salute_dati"]()           # un solo avviso
+    assert len(inviati) == 1 and "Dati fermi" in inviati[0] and "giovedì 26/11 alle 06:00" in inviati[0]
+    bot["SALUTE_DATI"]["GC=F"]["ultima_candela"] = ora - timedelta(minutes=10)
+    bot["job_salute_dati"]()
+    assert "di nuovo aggiornati" in inviati[-1] and len(inviati) == 2
+
+
+def test_nessun_falso_allarme_nel_weekend(bot, inviati, monkeypatch):
+    """Lunedì 01:00 italiane: l'oro ha riaperto domenica alle 18:00 ET (00:00 italiane),
+    meno di 2 ore di mercato dall'ultima candela di venerdì → nessun avviso."""
+    R = bot["ROME_TZ"]
+    ora = R.localize(datetime(2026, 12, 7, 1, 0))
+    ultima = R.localize(datetime(2026, 12, 4, 23, 0))            # venerdì 17:00 ET
+
+    class Orologio(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return ora.astimezone(tz) if tz else ora
+    monkeypatch.setitem(bot, "datetime", Orologio)
+    bot["ticker_fermi"].clear()
+    _fermo(bot, "GC=F", ultima, ora)
+    bot["job_salute_dati"]()
+    assert inviati == []
+
+
+def test_nessun_avviso_per_strumenti_non_scaricati(bot, inviati):
+    """Strategia spenta o fuori orario: il ticker non viene scaricato da tempo → nessun avviso."""
+    R = bot["ROME_TZ"]
+    ora = datetime.now(R)
+    bot["ticker_fermi"].clear()
+    bot["SALUTE_DATI"].clear()
+    bot["SALUTE_DATI"]["^GSPC"] = {"fallimenti": 0, "ultimo_ok": ora - timedelta(hours=20),
+                                   "errore": "", "ultima_candela": ora - timedelta(days=3)}
+    bot["job_salute_dati"]()
+    assert inviati == []

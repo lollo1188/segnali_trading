@@ -77,16 +77,24 @@ def _vwap_giornaliero_et(df: pd.DataFrame) -> pd.Series:
 
 
 # ── Download dati ─────────────────────────────────────────────────────────────
-# Salute dei dati: per ogni ticker, download falliti di fila e ultimo download riuscito.
-# main.py la controlla e avvisa su Telegram se Yahoo non risponde.
+# Salute dei dati: per ogni ticker, download falliti di fila, ultimo download riuscito e
+# chiusura dell'ultima candela intraday ricevuta. main.py la controlla e avvisa su
+# Telegram se Yahoo non risponde o se risponde con dati fermi.
 SALUTE_DATI: dict = {}
+_MINUTI_INTERVALLO = {"1m": 1, "5m": 5, "15m": 15, "30m": 30, "1h": 60}
 
 
-def _segna_download(ticker: str, ok: bool, errore: str = "") -> None:
-    s = SALUTE_DATI.setdefault(ticker, {"fallimenti": 0, "ultimo_ok": None, "errore": ""})
+def _segna_download(ticker: str, ok: bool, errore: str = "",
+                    df: Optional[pd.DataFrame] = None, interval: str = "") -> None:
+    s = SALUTE_DATI.setdefault(ticker, {"fallimenti": 0, "ultimo_ok": None, "errore": "",
+                                        "ultima_candela": None})
     if ok:
         s["fallimenti"] = 0
         s["ultimo_ok"] = datetime.now(ROME_TZ)
+        if df is not None and len(df) and interval in _MINUTI_INTERVALLO:
+            fine = (df.index[-1] + pd.Timedelta(minutes=_MINUTI_INTERVALLO[interval])).to_pydatetime()
+            if s.get("ultima_candela") is None or fine > s["ultima_candela"]:
+                s["ultima_candela"] = fine
     else:
         s["fallimenti"] += 1
         s["errore"] = errore
@@ -103,7 +111,7 @@ def get_data(ticker: str, period: str, interval: str) -> Optional[pd.DataFrame]:
         if df.index.tz is None:
             df.index = df.index.tz_localize("UTC")
         df.index = df.index.tz_convert(ROME_TZ)
-        _segna_download(ticker, True)
+        _segna_download(ticker, True, df=df, interval=interval)
         return df.dropna()
     except Exception as e:
         logger.error(f"Errore download {ticker}: {e}")
