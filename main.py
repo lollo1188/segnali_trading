@@ -204,6 +204,63 @@ def _esito_job(name, errore=None):
                    f"I segnali di questa strategia potrebbero non arrivare: guarda i log su Railway.")
 
 
+# ── Rischio totale delle posizioni teoriche aperte ───────────────────────────
+# Su Railway → Variables (facoltative): RISCHIO_PER_TRADE (default 1.5, in % del capitale)
+# e MAX_RISCHIO_TOTALE (default 4). Servono solo per il calcolo mostrato nel messaggio.
+def _percentuale(nome_var, default):
+    try:
+        return float(os.environ.get(nome_var, default))
+    except ValueError:
+        logger.warning(f"{nome_var} non valido: uso {default}")
+        return default
+
+
+RISCHIO_PER_TRADE = _percentuale("RISCHIO_PER_TRADE", 1.5)
+MAX_RISCHIO_TOTALE = _percentuale("MAX_RISCHIO_TOTALE", 4.0)
+# Strumenti che si muovono insieme: due posizioni nella stessa direzione sullo stesso
+# gruppo sono quasi la stessa scommessa.
+GRUPPO = {"vwap_gold": "oro", "london_sweep": "oro", "kumo_gold_4h": "oro",
+          "orb_sp500": "azionario USA", "kumo_nasdaq": "azionario USA", "orb_ant": "azionario USA",
+          "orb_cat": "azionario USA", "orb_avgo": "azionario USA",
+          "pullback_sp500": "azionario USA", "pullback_avgo": "azionario USA"}
+NOME_BREVE = {"vwap_gold": "VWAP Oro", "london_sweep": "London Sweep", "kumo_gold_4h": "Kumo Oro",
+              "orb_sp500": "ORB S&amp;P500", "kumo_nasdaq": "Kumo Nasdaq", "orb_ant": "ORB ANT",
+              "orb_cat": "ORB CAT", "orb_avgo": "ORB AVGO",
+              "pullback_sp500": "Ritracciamento S&amp;P500", "pullback_avgo": "Ritracciamento AVGO"}
+
+
+def _fmt_pct(x):
+    return f"{x:.1f}".replace(".", ",").replace(",0", "") + "%"
+
+
+def blocco_rischio(name, direzione):
+    """Righe per il messaggio: posizioni teoriche già aperte, rischio totale e concentrazione.
+    Stringa vuota se non c'è nulla di aperto (o se il registro non è disponibile)."""
+    try:
+        aperte = []                                   # (strategia, direzione)
+        if registro is not None:
+            aperte += [(r["strategia"], r["direzione"]) for r in registro.aperti()]
+        aperte += [(k, "LONG") for k in posizioni_pb if k != name]
+        if not aperte:
+            return ""
+        elenco = " · ".join(f"{NOME_BREVE.get(k, k)} {d}" for k, d in aperte)
+        totale = (len(aperte) + 1) * RISCHIO_PER_TRADE
+        oltre = totale > MAX_RISCHIO_TOTALE + 1e-9
+        righe = [f"📂 <b>Già aperti (teorici):</b> {elenco}",
+                 f"💼 Con questo: {len(aperte) + 1} posizioni ≈ {_fmt_pct(totale)} di rischio "
+                 f"(limite {_fmt_pct(MAX_RISCHIO_TOTALE)})"
+                 + (" — ⚠️ <b>oltre il limite</b>: salta il segnale o riduci la size" if oltre else "")]
+        gruppo = GRUPPO.get(name)
+        stessi = [NOME_BREVE.get(k, k) for k, d in aperte if GRUPPO.get(k) == gruppo and d == direzione]
+        if gruppo and stessi:
+            righe.append(f"🔗 Stessa direzione sull'{gruppo}: {', '.join(stessi)} → si muovono insieme, "
+                         f"rischio concentrato")
+        return "\n".join(righe) + "\n"
+    except Exception as e:
+        logger.warning(f"[{name}] Rischio totale non calcolato: {type(e).__name__}: {e}")
+        return ""
+
+
 def run_check(name, fn, cooldown_h=4):
     if name in STRATEGIE_SPENTE:
         return
@@ -222,6 +279,7 @@ def run_check(name, fn, cooldown_h=4):
                     signal["prezzo_attuale"] = fmt(px)
             except Exception as e:
                 logger.warning(f"[{name}] Prezzo attuale non disponibile: {type(e).__name__}")
+            signal["rischio_aperti"] = blocco_rischio(name, signal["direzione"])
             if send_telegram(signal):
                 logger.info(f"[{name}] Segnale inviato: {signal['direzione']}")
                 register(name, signal["direzione"])
@@ -301,6 +359,8 @@ def job_pullback(name):
         else:
             posizioni_pb.pop(name, None)
         salva_stato()
+        if msg and msg.get("tipo") == "ENTRATA":
+            msg["rischio_aperti"] = blocco_rischio(name, "LONG")
         if msg and send_pullback(msg):
             logger.info(f"[{name}] Messaggio inviato: {msg['tipo']}")
         elif msg:

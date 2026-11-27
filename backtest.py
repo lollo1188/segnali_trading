@@ -174,7 +174,7 @@ def backtest_surfista():
     if df is None: return None
     df["ema9"] = ema(df["Close"], 9); df["ema21"] = ema(df["Close"], 21)
     df["rsi"] = rsi(df["Close"], 14); df["atr"] = atr_calc(df, 14)
-    df.dropna(inplace=True)
+    df = df.dropna()
     signals = []
     for i in range(1, len(df) - 1):
         row, prev, nxt = df.iloc[i], df.iloc[i-1], df.iloc[i+1]
@@ -202,7 +202,7 @@ def backtest_pendolo():
     df["bb_mid"], df["bb_up"], df["bb_low"] = bollinger(df["Close"], 20, 2.2)
     try: df["vwap"] = calc_vwap(df)
     except: df["vwap"] = df["Close"].rolling(20).mean()
-    df.dropna(inplace=True)
+    df = df.dropna()
     signals = []
     for i in range(len(df) - 1):
         row, nxt = df.iloc[i], df.iloc[i+1]
@@ -228,7 +228,7 @@ def backtest_rompighiaccio():
     df["atr"] = atr_calc(df, 14)
     try: df["vwap"] = calc_vwap(df)
     except: df["vwap"] = df["Close"].rolling(20).mean()
-    df.dropna(inplace=True)
+    df = df.dropna()
     signals = []
     for d in sorted(set(df.index.date)):
         day_df = df[df.index.date == d]
@@ -259,7 +259,7 @@ def backtest_barile_caldo():
     if len(df) < 50: return None
     df["ema200"] = ema(df["Close"], 200); df["atr"] = atr_calc(df, 14)
     df["st"], df["st_dir"] = supertrend(df, 10, 3.0)
-    df.dropna(inplace=True)
+    df = df.dropna()
     signals = []
     for i in range(1, len(df) - 1):
         prev, row, nxt = df.iloc[i-1], df.iloc[i], df.iloc[i+1]
@@ -405,7 +405,7 @@ def backtest_liquidity_grab():
         tp_val = (g["High"] + g["Low"] + g["Close"]) / 3
         parts.append((tp_val * g["Volume"]).cumsum() / g["Volume"].cumsum())
     df["vwap"] = pd.concat(parts).reindex(df.index)
-    df.dropna(inplace=True)
+    df = df.dropna()
 
     signals = []
     for d in sorted(set(df.index.date)):
@@ -498,7 +498,7 @@ def backtest_initial_balance():
         tp_val = (g["High"] + g["Low"] + g["Close"]) / 3
         parts.append((tp_val * g["Volume"]).cumsum() / g["Volume"].cumsum())
     df["vwap"] = pd.concat(parts).reindex(df.index)
-    df.dropna(inplace=True)
+    df = df.dropna()
 
     signals = []
     for d in sorted(set(df.index.date)):
@@ -586,7 +586,7 @@ def backtest_gap_fill():
     df.index = df.index.tz_convert(ROME_TZ)
 
     df["atr14"] = atr_calc(df, 14)
-    df.dropna(inplace=True)
+    df = df.dropna()
 
     signals = []
     days = sorted(set(df.index.date))
@@ -716,11 +716,11 @@ def backtest_orb_regime():
         tp_val = (g["High"] + g["Low"] + g["Close"]) / 3
         parts.append((tp_val * g["Volume"]).cumsum() / g["Volume"].cumsum())
     df_15m["vwap"] = pd.concat(parts).reindex(df_15m.index)
-    df_15m.dropna(inplace=True)
+    df_15m = df_15m.dropna()
 
     # SMA20 giornaliera S&P500
     df_day["sma20"] = df_day["Close"].rolling(20).mean()
-    df_day.dropna(inplace=True)
+    df_day = df_day.dropna()
 
     def get_regime(date):
         # VIX del giorno precedente
@@ -839,7 +839,7 @@ def backtest_orb_azione(ticker, label, max_risk_pct=0.05, permetti_short=True):
         tp_val = (g["High"] + g["Low"] + g["Close"]) / 3
         parts.append((tp_val * g["Volume"]).cumsum() / g["Volume"].cumsum())
     df["vwap"] = pd.concat(parts).reindex(df.index)
-    df.dropna(inplace=True)
+    df = df.dropna()
 
     signals = []
     for d in sorted(set(df.index.date)):
@@ -935,7 +935,7 @@ def _trades_pullback(df, rsi_soglia=10, usa_filtro_trend=True, atr_stop=3.0, max
     d["sma5"] = d["Close"].rolling(5).mean()
     d["rsi2"] = rsi(d["Close"], 2)
     d["atr"] = atr_calc(d, 14)
-    d.dropna(inplace=True)
+    d = d.dropna()
 
     O, L, C = d["Open"].values, d["Low"].values, d["Close"].values
     S5, S200, R2, A = d["sma5"].values, d["sma200"].values, d["rsi2"].values, d["atr"].values

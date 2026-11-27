@@ -217,7 +217,7 @@ def check_vwap_reversal_gold() -> Optional[dict]:
     df["rsi14"] = rsi(df["Close"], 14)
     df["atr14"] = atr(df, 14)
     df["vwap"], df["vb2u"], df["vb2d"] = calc_vwap_bands(df)
-    df.dropna(inplace=True)
+    df = df.dropna()
     if len(df) < 3:
         return None
 
@@ -293,7 +293,7 @@ def check_london_sweep_gold() -> Optional[dict]:
 
     df["sma20"] = sma(df["Close"], 20)
     df["atr14"] = atr(df, 14)
-    df.dropna(inplace=True)
+    df = df.dropna()
 
     now_cet = datetime.now(ROME_TZ)
     if not (time(8, 0) <= now_cet.time() <= time(10, 0)):
@@ -373,7 +373,7 @@ def check_orb_sp500() -> Optional[dict]:
 
     # VWAP giornaliero (giorno di borsa USA)
     df["vwap"] = _vwap_giornaliero_et(df)
-    df.dropna(inplace=True)
+    df = df.dropna()
 
     now_et = adesso_et()
     if not in_orario_et(time(9, 45), CHIUSURA_INTRADAY_ET, now_et):
@@ -487,7 +487,7 @@ def check_kumo_gold_4h() -> Optional[dict]:
     df["c_26"] = df["Close"].shift(26)
     df["rsi14"] = rsi(df["Close"], 14)
     df["atr14"] = atr(df, 14)
-    df.dropna(inplace=True)
+    df = df.dropna()
     if len(df) < 4:
         return None
 
@@ -574,7 +574,7 @@ def check_kumo_nasdaq_1h() -> Optional[dict]:
     df["c_26"] = df["Close"].shift(26)
     df["rsi14"] = rsi(df["Close"], 14)
     df["atr14"] = atr(df, 14)
-    df.dropna(inplace=True)
+    df = df.dropna()
     if len(df) < 4:
         return None
 
@@ -674,7 +674,7 @@ def _check_orb_azione(ticker: str, nome: str, asset: str, short_ok: bool,
 
     # VWAP giornaliero (giorno di borsa USA)
     df["vwap"] = _vwap_giornaliero_et(df)
-    df.dropna(inplace=True)
+    df = df.dropna()
     if len(df) < 3:
         return None
 

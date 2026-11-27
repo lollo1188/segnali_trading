@@ -103,6 +103,15 @@ def registra(name: str, ticker: str, signal: dict, inviato: Optional[datetime] =
         logger.error(f"[registro] {name}: segnale non registrato ({type(e).__name__}: {e})")
 
 
+def aperti(ora: Optional[datetime] = None) -> List[dict]:
+    """Posizioni teoriche ancora aperte: non ancora chiuse dalla valutazione e non scadute.
+    (Una posizione che ha toccato lo stop negli ultimi 30 minuti può risultare ancora aperta
+    finché la valutazione periodica non la chiude.)"""
+    ora = ora or datetime.now(ROME_TZ)
+    with _lock:
+        return [dict(r) for r in _tutti() if r.get("esito") is None and r["scadenza"] > ora]
+
+
 def _valuta_uno(rec: dict, df: pd.DataFrame, ora: datetime) -> bool:
     """Aggiorna rec se la posizione teorica si è chiusa. True se chiusa ora."""
     d = 1 if rec["direzione"] == "LONG" else -1

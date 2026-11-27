@@ -1,0 +1,24 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version   # 3.11, come su Railway
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Installa le dipendenze (versioni bloccate)
+        run: pip install -r requirements-dev.txt
+      - name: Controllo del codice (pyflakes)
+        run: python -m pyflakes *.py tests/*.py
+      - name: Test (offline, dati simulati)
+        run: python -m pytest -q tests

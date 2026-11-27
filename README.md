@@ -122,6 +122,22 @@ Il risultato è in **R** (multipli del rischio: +2,5R = target dell'ORB, −1R =
 
 ---
 
+## 💼 Rischio totale nel messaggio
+
+Se ci sono altre posizioni teoriche aperte (dal registro e dal ritracciamento), ogni nuovo segnale lo dice:
+
+```
+📂 Già aperti (teorici): ORB S&P500 LONG · Ritracciamento S&P500 LONG
+💼 Con questo: 3 posizioni ≈ 4,5% di rischio (limite 4%) — ⚠️ oltre il limite: salta il segnale o riduci la size
+🔗 Stessa direzione sull'azionario USA: ORB S&P500, Ritracciamento S&P500 → si muovono insieme, rischio concentrato
+```
+
+- Il calcolo usa il rischio per trade e il limite totale delle variabili `RISCHIO_PER_TRADE` (default 1,5%) e `MAX_RISCHIO_TOTALE` (default 4%).
+- Gruppi che si muovono insieme: **oro** (VWAP, London Sweep, Kumo Oro) e **azionario USA** (ORB, Kumo Nasdaq, ritracciamento).
+- Sono posizioni **teoriche**: il bot non sa quali hai aperto davvero. Una posizione che ha appena toccato lo stop può risultare ancora aperta per al massimo 30 minuti.
+
+---
+
 ## 🚨 Avvisi automatici
 
 Il bot ti scrive su Telegram quando:
@@ -229,9 +245,10 @@ python3 backtest.py azioni # ORB su CAT e AVGO (60 giorni, un trade al giorno)
 python3 backtest.py trend  # ritracciamento nel trend, S&P500 giornaliero (dal 1993)
 python3 backtest.py trend_azioni  # stessa idea su CAT e AVGO (giornaliero)
 python3 backtest.py bot    # strategie 1, 2, 4, 5 del bot: VWAP Reversal, London Sweep, Kumo Oro 4H e Nasdaq 1H
-python3 verifica_backtest.py  # controlla che bot e backtest diano gli stessi segnali (strategie 1, 2, 4, 5)
+python3 verifica_backtest.py  # controlla che bot e backtest diano gli stessi segnali (le 6 strategie accese)
 COSTI_X=2 python3 backtest.py orb # stress test: spread moltiplicati per 2
 ```
+
 
 Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine sessione senza toccare stop né target ("Open"), al netto dei costi. La colonna `Open` ti dice quanti sono.
 
@@ -248,6 +265,16 @@ Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine s
 - Backtest `trend_azioni` (giornaliero, costi attuali: spread 0,04% e finanziamento 6,8% annuo): **CAT** non mostra vantaggio (PF 0,90 sviluppo e 0,92 verifica, sotto 1 anche con soglie diverse). **AVGO** sì: PF 1,39 sviluppo, 1,77 verifica, 270 trade dal 2010, e resta a 1,26 con costi tripli. Ma il rendimento è piccolo (circa +17% in 16 anni, ≈1% l'anno a rischio 1% per trade, in mercato per circa il 15% dei giorni) e funziona anche senza filtro sulla media a 200 giorni: gran parte del vantaggio può dipendere dal trend eccezionale del titolo (scelto col senno di poi) più che dalla regola. I gap sui risultati trimestrali sono nei dati ma non evitati.
 - Backtest ORB (60 giorni, costi in % da schermata/KID): CAT PF 1,25 (36 trade), AVGO PF 1,30 (46 trade), S&P 500 **PF 1,40 (59 trade, +9,4%; 1,22 con costi raddoppiati)**, misurato il 27/11/2026 con il backtest corretto (sugli stessi dati la versione vecchia dava PF 1,00 su 48 trade: misurava una strategia diversa da quella del bot); le altre varianti S&P hanno 3–28 trade. Con campioni così piccoli e un solo periodo di mercato **non dimostrano un vantaggio**: l'ORB resta non validata. Circa due trade su tre (37 su 59 per l'S&P 500) chiudono a fine sessione senza toccare stop né target.
 - Per ANT non esiste storico sufficiente: nessun backtest possibile.
+
+
+### Test automatici
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q tests      # offline, dati simulati, pochi secondi
+```
+
+Su GitHub partono da soli a ogni pull request e a ogni push su `main` (`.github/workflows/test.yml`): installano le versioni bloccate con Python 3.11, come su Railway, e lanciano pyflakes e i test. Se una pull request mostra la ❌ rossa, non unirla prima di aver capito perché.
 
 ---
 
@@ -293,6 +320,7 @@ Variabili **opzionali** (strategie su azioni):
 
 - `ANT_ABILITA_SHORT`, `CAT_ABILITA_SHORT`, `AVGO_ABILITA_SHORT` = `1` o `0` (default: ANT `0`, CAT e AVGO `1`)
 - `TICKER_ANT`, `TICKER_CAT`, `TICKER_AVGO` = simbolo Yahoo Finance, se diverso da quello predefinito
+- `RISCHIO_PER_TRADE`, `MAX_RISCHIO_TOTALE` = rischio per segnale e limite totale in % del capitale, usati per il calcolo "Già aperti" nei messaggi (default 1,5 e 4)
 - `STRATEGIE_SPENTE` = elenco di strategie da **spegnere**, separate da virgole (es. `orb_cat,orb_avgo`). Nomi validi: `vwap_gold`, `london_sweep`, `orb_sp500`, `orb_ant`, `orb_cat`, `orb_avgo`, `kumo_gold_4h`, `kumo_nasdaq`, `pullback_sp500`, `pullback_avgo`. Variabile assente o vuota = tutte attive. Per riaccenderle togli il nome: Railway riavvia il bot da solo. Il messaggio di avvio su Telegram mostra quali sono spente.
 
 Railway riavvia il bot da solo.
