@@ -52,7 +52,7 @@ def test_esiti_e_salvataggio():
     assert registro._tutti()[0]["esito"] == "TARGET"
 
     testo = registro.riepilogo(7, ora=ora + timedelta(days=1))
-    assert "ORB S&amp;P500" in testo and "+2,5R" in testo and "⏳ 1" in testo
+    assert "ORB S&amp;P500" in testo and "+2,48R" in testo and "⏳ 1" in testo
 
 
 def test_stop_prima_del_target_nella_stessa_candela():
@@ -63,3 +63,11 @@ def test_stop_prima_del_target_nella_stessa_candela():
         return pd.DataFrame({"Open": 100, "High": 102, "Low": 98, "Close": 100, "Volume": 1}, index=idx)
     registro.valuta(candela_enorme, FINE + timedelta(hours=1))
     assert registro._tutti()[0]["esito"] == "STOP"
+
+
+def test_scadenza_nella_mezza_seduta():
+    """24/12/2026: chiusura anticipata alle 13:00 ET → posizione teorica chiusa alle 12:45 ET (18:45 italiane)."""
+    fine = ROME.localize(datetime(2026, 12, 24, 16, 30))
+    registro.registra("orb_sp500", "^GSPC", {"direzione": "LONG", "entry": "100", "sl": "99", "tp": "102.5",
+                                             "candela_fine": fine}, fine)
+    assert registro._tutti()[0]["scadenza"] == ROME.localize(datetime(2026, 12, 24, 18, 45))

@@ -56,7 +56,7 @@ Segnale a fine seduta USA, **ingresso all'apertura del giorno dopo**, solo long:
 
 ## 🕐 Quando arrivano i segnali (ora italiana, lun–ven)
 
-Le strategie USA (ORB, Kumo Nasdaq, ritracciamento) seguono l'**ora di New York**: gli orari sotto valgono per la maggior parte dell'anno. Nelle settimane in cui l'ora legale USA ed Europa è sfasata (marzo e fine ottobre/inizio novembre) arrivano **un'ora prima** (es. ORB S&P500 dalle 15:00, chiusura intraday alle 20:45). Il messaggio indica sempre l'ora giusta di chiusura.
+Le strategie USA (ORB, Kumo Nasdaq, ritracciamento) seguono l'**ora di New York**: gli orari sotto valgono per la maggior parte dell'anno. Nelle settimane in cui l'ora legale USA ed Europa è sfasata (marzo e fine ottobre/inizio novembre) arrivano **un'ora prima** (es. ORB S&P500 dalle 15:00, chiusura intraday alle 20:45). Il messaggio indica sempre l'ora giusta di chiusura. Nelle **mezze sedute** del calendario (es. 24/12 e il giorno dopo Thanksgiving, chiusura alle 19:00 italiane) gli ORB smettono di cercare ingressi alle 18:45 e il messaggio dice "chiudi entro le 18:45"; anche il registro chiude lì le posizioni teoriche.
 
 | Strategia | Orari possibili | Note |
 |-----------|-----------------|------|

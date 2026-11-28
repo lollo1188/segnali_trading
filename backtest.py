@@ -322,8 +322,17 @@ def backtest_orb_sp500(label="ORB BASE", atr_buf=0.1, vol_mult=None, rsi_long=52
         or_high, or_low = or_bar["High"].iloc[0], or_bar["Low"].iloc[0]
         or_range = or_high - or_low
 
+        # Chiusura intraday: 15:45 ET, o 15 minuti prima della chiusura nelle mezze sedute
+        # (come il bot). Ultima candela valutata: 30 minuti prima (15:15, o 12:15).
+        try:
+            from news_filter import MEZZE_SEDUTE_USA
+            mezza = MEZZE_SEDUTE_USA.get(d)
+        except Exception:
+            mezza = None
+        chiusura = (pd.Timestamp.combine(d, mezza) - pd.Timedelta(minutes=15)).time() if mezza else time(15, 45)
+        ultima = (pd.Timestamp.combine(d, chiusura) - pd.Timedelta(minutes=30)).time()
         for k in range(len(day) - 1):                  # serve la candela dopo (in formazione)
-            if not (time(9, 45) <= t_et[k] <= time(15, 15)):
+            if not (time(9, 45) <= t_et[k] <= ultima):
                 continue
             # il bot fa la media sulle candele di oggi disponibili, compresa quella in formazione
             atr_day = day["atr14"].iloc[:k + 2].mean()
@@ -358,7 +367,7 @@ def backtest_orb_sp500(label="ORB BASE", atr_buf=0.1, vol_mult=None, rsi_long=52
             if ultimo and ultimo[0] == sig["direction"] and ts - ultimo[1] < pd.Timedelta(hours=8):
                 continue
             dopo = day.iloc[k + 1:]
-            dopo = dopo[dopo.index.tz_convert(ET_TZ).time < time(15, 45)]
+            dopo = dopo[dopo.index.tz_convert(ET_TZ).time < chiusura]
             uscita = _forward_exit(dopo, sig["direction"], sig["sl"], sig["tp"])
             if uscita is None:
                 continue

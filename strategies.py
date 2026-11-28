@@ -47,6 +47,26 @@ TICKER_AVGO = os.environ.get("TICKER_AVGO", "AVGO")  # Broadcom, Nasdaq
 # ── Orari di New York ─────────────────────────────────────────────────────────
 APERTURA_USA_ET = time(9, 30)      # prima candela 15 min = opening range
 CHIUSURA_INTRADAY_ET = time(15, 45)  # chiudi le intraday USA 15 min prima della chiusura
+ULTIMI_INGRESSI_AZIONI_ET = time(14, 30)
+
+
+def chiusura_intraday_et(giorno=None) -> time:
+    """Ora (New York) entro cui chiudere le intraday USA: 15 minuti prima della chiusura
+    della borsa. Nelle mezze sedute (MEZZE_SEDUTE_USA del calendario, es. 13:00) è 12:45."""
+    d = giorno or adesso_et().date()
+    try:
+        from news_filter import MEZZE_SEDUTE_USA
+        chiusura = MEZZE_SEDUTE_USA.get(d)
+    except Exception:
+        chiusura = None
+    if chiusura is None:
+        return CHIUSURA_INTRADAY_ET
+    return (datetime.combine(d, chiusura) - timedelta(minutes=15)).time()
+
+
+def ultimi_ingressi_azioni_et(giorno=None) -> time:
+    """Ultimo controllo per gli ORB su azioni: 14:30 ET, o prima nelle mezze sedute."""
+    return min(ULTIMI_INGRESSI_AZIONI_ET, chiusura_intraday_et(giorno))
 
 
 def adesso_et() -> datetime:
@@ -384,7 +404,8 @@ def check_orb_sp500() -> Optional[dict]:
     df = df.dropna()
 
     now_et = adesso_et()
-    if not in_orario_et(time(9, 45), CHIUSURA_INTRADAY_ET, now_et):
+    chiusura = chiusura_intraday_et(now_et.date())        # 15:45 ET, 12:45 nelle mezze sedute
+    if not in_orario_et(time(9, 45), chiusura, now_et):
         return None
 
     idx_et = df.index.tz_convert(ET_TZ)
@@ -409,7 +430,7 @@ def check_orb_sp500() -> Optional[dict]:
     prev = df.iloc[-3]
     entry = curr["Close"]
     a = curr["atr14"]
-    chiudi = ora_it(CHIUSURA_INTRADAY_ET)
+    chiudi = ora_it(chiusura, now_et.date())
 
     # LONG: breakout sopra OR high + sopra VWAP + EMA20 crescente + RSI > 52
     if (entry > or_high + 0.1 * a and
@@ -687,7 +708,8 @@ def _check_orb_azione(ticker: str, nome: str, asset: str, short_ok: bool,
         return None
 
     now_et = adesso_et()
-    if not in_orario_et(time(10, 0), time(14, 30), now_et):
+    chiusura = chiusura_intraday_et(now_et.date())
+    if not in_orario_et(time(10, 0), ultimi_ingressi_azioni_et(now_et.date()), now_et):
         return None
 
     # Usa [-2] = ultima candela chiusa, [-1] è ancora in formazione
@@ -719,7 +741,7 @@ def _check_orb_azione(ticker: str, nome: str, asset: str, short_ok: bool,
 
     entry = curr["Close"]
     a = curr["atr14"]
-    chiudi = ora_it(CHIUSURA_INTRADAY_ET)
+    chiudi = ora_it(chiusura, now_et.date())
 
     # LONG: breakout sopra OR high + sopra VWAP + EMA20 crescente + RSI > 52
     if (entry > or_high + 0.1 * a and

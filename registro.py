@@ -73,7 +73,13 @@ def _scadenza(name: str, fine: datetime) -> datetime:
     """Quando la posizione teorica viene chiusa se non tocca stop né target."""
     if name in STRATEGIE_USA_INTRADAY:
         d = fine.astimezone(ET_TZ).date()
-        return ET_TZ.localize(datetime.combine(d, time(15, 45))).astimezone(ROME_TZ)
+        try:
+            from news_filter import MEZZE_SEDUTE_USA
+            chiusura = MEZZE_SEDUTE_USA.get(d)
+        except Exception:
+            chiusura = None
+        fine_et = (datetime.combine(d, chiusura) - timedelta(minutes=15)).time() if chiusura else time(15, 45)
+        return ET_TZ.localize(datetime.combine(d, fine_et)).astimezone(ROME_TZ)
     if name in ("vwap_gold", "london_sweep"):
         d = fine.astimezone(ROME_TZ).date()
         return ROME_TZ.localize(datetime.combine(d, time(21, 45)))
@@ -204,7 +210,7 @@ def _riga(nome: str, s: dict) -> str:
     pf = "—" if s["pf"] is None else ("∞" if s["pf"] == float("inf") else f"{s['pf']:.2f}".replace(".", ","))
     riga = (f"<b>{nome}</b>: {s['n']} segnali | ✅ {s['vinti']} ❌ {s['persi']}"
             + (f" ⏳ {s['aperti']}" if s["aperti"] else "")
-            + f" | {_num(s['r_tot'], 1)}R | PF {pf}")
+            + f" | {_num(s['r_tot'], 2)}R | PF {pf}")
     extra = []
     if s["slip"] is not None:
         extra.append(f"slittamento medio {s['slip']:.0f}% del rischio")
