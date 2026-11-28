@@ -249,7 +249,6 @@ python3 backtest.py trend_azioni  # stessa idea su CAT e AVGO (giornaliero)
 python3 backtest.py bot    # strategie 1, 2, 4, 5 del bot: VWAP Reversal, London Sweep, Kumo Oro 4H e Nasdaq 1H
 python3 verifica_backtest.py  # controlla che bot e backtest diano gli stessi segnali (le 6 strategie accese)
 COSTI_X=2 python3 backtest.py orb # stress test: spread moltiplicati per 2
-python3 backtest.py nuove  # idee NON nel bot: trend following giornaliero (oro e altri), inizio/fine mese S&P500
 ```
 
 
@@ -268,10 +267,6 @@ Il calcolo del **Profit Factor** usa tutti i trade, anche quelli chiusi a fine s
 - Backtest `trend_azioni` (giornaliero, costi attuali: spread 0,04% e finanziamento 6,8% annuo): **CAT** non mostra vantaggio (PF 0,90 sviluppo e 0,92 verifica, sotto 1 anche con soglie diverse). **AVGO** sì: PF 1,39 sviluppo, 1,77 verifica, 270 trade dal 2010, e resta a 1,26 con costi tripli. Ma il rendimento è piccolo (circa +17% in 16 anni, ≈1% l'anno a rischio 1% per trade, in mercato per circa il 15% dei giorni) e funziona anche senza filtro sulla media a 200 giorni: gran parte del vantaggio può dipendere dal trend eccezionale del titolo (scelto col senno di poi) più che dalla regola. I gap sui risultati trimestrali sono nei dati ma non evitati.
 - Backtest ORB (60 giorni, costi in % da schermata/KID): CAT PF 1,25 (36 trade), AVGO PF 1,30 (46 trade), S&P 500 **PF 1,40 (59 trade, +9,4%; 1,22 con costi raddoppiati)**, misurato il 27/11/2026 con il backtest corretto (sugli stessi dati la versione vecchia dava PF 1,00 su 48 trade: misurava una strategia diversa da quella del bot); le altre varianti S&P hanno 3–28 trade. Con campioni così piccoli e un solo periodo di mercato **non dimostrano un vantaggio**: l'ORB resta non validata. Circa due trade su tre (37 su 59 per l'S&P 500) chiudono a fine sessione senza toccare stop né target.
 - Per ANT non esiste storico sufficiente: nessun backtest possibile.
-- **Idee nuove scartate** (`backtest.py nuove`, 27/11/2026, regole classiche fissate prima del test, costi Revolut con finanziamento notturno):
-  - **Trend following giornaliero sull'oro** (Donchian 55/20 e medie 50/200). Long/short: nessun vantaggio (Donchian PF 0,92 nello sviluppo, 0,75 con costi ×2). Solo long dal 2000 sembra buono (PF 1,52 sviluppo, 3,00 verifica), ma solo perché l'oro è salito del 1.234%: con i dati Stooq del 1985–2001, oro in calo, perde (PF 0,70). Stesso schema sull'argento (0,53 nel 1985–2001). Le medie 50/200 hanno troppo pochi trade (6–16) e falliscono la verifica su Stooq (PF 0,73).
-  - **Inizio/fine mese sull'S&P500** (ultimo giorno di borsa + primi 3). Fortissimo nel 1950–2003 (PF 1,83), quasi sparito dopo: PF 1,14 nella verifica e 1,09 dal 2006, con rendimento medio giornaliero 0,049% nella finestra contro 0,039% negli altri giorni.
-  - Con `STOOQ_CSV=/percorso/file.csv` il test aggiunge l'oro Stooq 1985–2021.
 
 
 ### Test automatici
