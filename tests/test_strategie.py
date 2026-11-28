@@ -98,3 +98,36 @@ def test_ritracciamento_ingresso_in_giorno_festivo(monkeypatch):
     msg, nuova, _ = st.analizza_pullback("^GSPC", "pullback_sp500", "S&P 500", pos)
     assert msg["tipo"] == "MANTIENI"
     assert nuova is not None and nuova["entry_date"] == date(2026, 7, 6)
+
+
+# ── Mezze sedute (24/12/2026: Wall Street chiude alle 13:00 ET = 19:00 italiane) ──
+VIGILIA = date(2026, 12, 24)
+
+
+def test_chiusura_intraday_nelle_mezze_sedute():
+    assert st.chiusura_intraday_et(VIGILIA) == time(12, 45)
+    assert st.chiusura_intraday_et(date(2026, 12, 23)) == time(15, 45)
+    assert st.ultimi_ingressi_azioni_et(VIGILIA) == time(12, 45)
+    assert st.ultimi_ingressi_azioni_et(date(2026, 12, 23)) == time(14, 30)
+
+
+@pytest.fixture
+def breakout_vigilia(monkeypatch):
+    df = pd.concat([_barre(date(2026, 12, 22), 0), _barre(date(2026, 12, 23), 0), _barre(VIGILIA, 6)])
+    adesso = ET.localize(datetime.combine(VIGILIA, time(11, 2)))
+    df = df[df.index <= adesso]
+    monkeypatch.setattr(st, "get_data", lambda *a, **k: df.copy())
+    monkeypatch.setattr(st, "adesso_et", lambda: adesso)
+    return df
+
+
+def test_orb_mezza_seduta_chiudi_entro_18_45(breakout_vigilia):
+    sig = st.check_orb_sp500()
+    assert sig and sig["chiudi_entro"] == "18:45" and "Chiudi entro 18:45" in sig["note"]
+    sig2 = st._check_orb_azione("CAT", "ORB CAT", "Caterpillar", True, 0.5, "")
+    assert sig2 and sig2["chiudi_entro"] == "18:45"
+
+
+def test_orb_niente_segnali_dopo_la_chiusura_anticipata(breakout_vigilia, monkeypatch):
+    monkeypatch.setattr(st, "adesso_et", lambda: ET.localize(datetime.combine(VIGILIA, time(13, 2))))
+    assert st.check_orb_sp500() is None

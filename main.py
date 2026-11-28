@@ -61,7 +61,8 @@ try:
         check_vwap_reversal_gold, check_london_sweep_gold,
         check_orb_sp500, check_kumo_gold_4h, check_kumo_nasdaq_1h,
         check_orb_ant, check_orb_cat, check_orb_avgo, analizza_pullback,
-        get_last_price, get_data, fmt, in_orario_et, ET_TZ, SALUTE_DATI, TICKER_GOLD, TICKER_SP500, TICKER_NASDAQ,
+        get_last_price, get_data, fmt, in_orario_et, ET_TZ, chiusura_intraday_et,
+        ultimi_ingressi_azioni_et, SALUTE_DATI, TICKER_GOLD, TICKER_SP500, TICKER_NASDAQ,
         TICKER_ANT, TICKER_CAT, TICKER_AVGO,
     )
     logger.info("Strategies importate OK")
@@ -334,13 +335,13 @@ def job_london_sweep():
 # Strategie USA: finestre in ORA DI NEW YORK (seguono l'apertura di Wall Street
 # anche nelle settimane con ora legale USA/Europa sfasata).
 def job_orb_sp500():
-    if not in_orario_et(time(9, 45), time(15, 45)): return      # 15:45–21:45 italiane
+    if not in_orario_et(time(9, 45), chiusura_intraday_et()): return   # 15:45–21:45 italiane (mezze sedute: fino alle 18:45)
     logger.info("▶ ORB S&P500")
     run_check("orb_sp500", check_orb_sp500, 8)
 
 
 def _job_orb_azione(name, label, fn):
-    if not in_orario_et(time(10, 0), time(14, 30)): return      # 16:00–20:30 italiane
+    if not in_orario_et(time(10, 0), ultimi_ingressi_azioni_et()): return   # 16:00–20:30 italiane
     logger.info(f"▶ ORB {label}")
     run_check(name, fn, 8)
 
